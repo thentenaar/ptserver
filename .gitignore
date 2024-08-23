@@ -1,0 +1,6 @@
+.*.sw?
+*.o
+*.db
+.wiki
+ptserver
+
