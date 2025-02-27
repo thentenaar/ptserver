@@ -113,7 +113,8 @@ void packet_in(struct pt_context *ctx)
 	}
 
 #ifndef NDEBUG
-	dump_packet(0, &ctx->pkt_in);
+	if (ctx->pkt_in.type != PACKET_PING)
+		dump_packet(0, &ctx->pkt_in);
 #endif
 
 	if (ctx->pkt_in.type == PACKET_CLIENT_DISCONNECT)
@@ -233,7 +234,8 @@ void send_packet(struct pt_context *ctx, struct pt_packet *pkt)
 	}
 
 #ifndef NDEBUG
-	dump_packet(1, pkt);
+	if (pkt->type != PACKET_PONG && pkt->type != PACKET_TIME_WRONG)
+		dump_packet(1, pkt);
 #endif
 
 	if (!(ctx->pkts_out = realloc(ctx->pkts_out, (ctx->npkts_out + 1) * sizeof(struct pt_packet *))) ||

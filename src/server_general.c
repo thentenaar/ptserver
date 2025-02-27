@@ -219,12 +219,26 @@ void general_flow(struct pt_context *ctx)
 	switch (ctx->pkt_in.type) {
 	case PACKET_PING:
 		/**
-		 * [PT 9.1] Data contains a 32-bit timestamp [from time(NULL)]
+		 * PT 9.1+: Data contains a 32-bit timestamp
 		 *
 		 * The client uses this to detect whether or not it can still
 		 * send on the socket.
 		 */
+		rid = (unsigned long)time(NULL);
 		ctx->time = uid;
+
+		/**
+		 * This seems to be ignored by the client, but the server still
+		 * sent it.
+		 */
+		if (uid != rid)
+			send_packet(ctx, new_packet(PACKET_TIME_WRONG, 0, NULL, 0));
+
+		buf[0] = (rid >> 24) & 0xff;
+		buf[1] = (rid >> 16) & 0xff;
+		buf[2] = (rid >> 8)  & 0xff;
+		buf[3] = rid & 0xff;
+		send_packet(ctx, new_packet(PACKET_PONG, 4, buf, PACKET_F_COPY));
 		break;
 	case PACKET_SET_PRIVACY:
 		/**
