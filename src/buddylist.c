@@ -29,28 +29,61 @@ static void *set_disp_name;
 extern struct ht *uid_to_context;
 
 /**
+ * Construct a STATUSCHANGE packet based on the recipient's protocol
+ * version
+ */
+static struct pt_packet *mk_statuschange(struct pt_context *ctx, unsigned long uid, unsigned long status, const char *msg)
+{
+	char buf[14 + STATUSMSG_MAX];
+	size_t msglen, len = 8;
+
+	buf[0] = (uid >> 24) & 0xff;
+	buf[1] = (uid >> 16) & 0xff;
+	buf[2] = (uid >> 8)  & 0xff;
+	buf[3] = uid & 0xff;
+	buf[4] = (char)((status >> 24) & 0xff);
+	buf[5] = (char)((status >> 16) & 0xff);
+	buf[6] = (char)((status >> 8) & 0xff);
+	buf[7] = (char)(status & 0xff);
+
+	/* TODO: PT 9.1 needs this extra bit... Not sure what these signify */
+	if (ctx->pkt_in.version >= PROTOCOL_VERSION_91) {
+		buf[8]  = 0x00;
+		buf[9]  = 0x5d;
+		buf[10] = 0x00;
+		buf[11] = 0x00;
+		buf[12] = 0x00;
+		buf[13] = 0x00;
+		len += 6;
+	}
+
+	if (status != STATUS_ONLINE && ctx->pkt_in.version >= PROTOCOL_VERSION_82 && msg) {
+		msglen = min(STATUSMSG_MAX, strlen(msg));
+		memcpy(buf + len, msg, msglen);
+		len += msglen;
+	}
+
+	return new_packet(PACKET_BUDDY_STATUSCHANGE, len, buf, PACKET_F_COPY);
+}
+
+/**
  * Send our status out to our buddies
  */
 static int do_broadcast_status(void *userdata, int cols, char *val[], char *col[])
 {
 	char buf[64];
-	void **ud = (void **)userdata;
+	struct pt_context *ctx = userdata, *buddy;
 	unsigned long uid;
-	struct pt_context *ctx, *buddy;
 	(void)cols;
 	(void)col;
 
-	if (!ud || !ud[0] || !ud[1])
-		return 0;
-
-	ctx = ud[0];
 	uid = atol(val[0]);
 	sprintf(buf, "%ld", uid);
 	if (!(buddy = ht_get_ptr_nc(uid_to_context, buf)) ||
 	    user_blocked_me(ctx, uid))
 		return 0;
 
-	send_packet(buddy, ud[1 + (buddy->protocol_version >= PROTOCOL_VERSION_82)]);
+	send_packet(buddy, mk_statuschange(buddy, ctx->uid, ctx->status, ctx->status_msg));
 	return 0;
 }
 
@@ -59,45 +92,22 @@ static int do_broadcast_status(void *userdata, int cols, char *val[], char *col[
  */
 static int send_buddy_status(void *userdata, int cols, char *val[], char *col[])
 {
-	char buf[64], uid_str[12];
-	size_t len = 8;
-	unsigned long uid;
-	struct pt_packet *pkt;
+	char uid_str[12];
+	unsigned long uid, status;
+	struct pt_packet *pkt = NULL;
 	struct pt_context *ctx = userdata, *buddy;
 	(void)cols;
 	(void)col;
 
 	uid = atol(val[0]);
 	sprintf(uid_str, "%ld", uid);
-	buf[0] = (uid >> 24) & 0xff;
-	buf[1] = (uid >> 16) & 0xff;
-	buf[2] = (uid >> 8)  & 0xff;
-	buf[3] = uid & 0xff;
-	buf[4] = (char)((STATUS_OFFLINE >> 24) & 0xff);
-	buf[5] = (char)((STATUS_OFFLINE >> 16) & 0xff);
-	buf[6] = (char)((STATUS_OFFLINE >> 8) & 0xff);
-	buf[7] = (char)(STATUS_OFFLINE & 0xff);
-
-	if (i_blocked_user(ctx, uid)) {
-		buf[4] = (char)((STATUS_BLOCKED >> 24) & 0xff);
-		buf[5] = (char)((STATUS_BLOCKED >> 16) & 0xff);
-		buf[6] = (char)((STATUS_BLOCKED >> 8) & 0xff);
-		buf[7] = (char)(STATUS_BLOCKED & 0xff);
-	} else if ((buddy = ht_get_ptr_nc(uid_to_context, uid_str))) {
-		buf[4] = (char)((buddy->status >> 24) & 0xff);
-		buf[5] = (char)((buddy->status >> 16) & 0xff);
-		buf[6] = (char)((buddy->status >> 8) & 0xff);
-		buf[7] = (char)(buddy->status & 0xff);
-
-		if (buddy->status != STATUS_ONLINE &&
-		    ctx->pkt_in.version >= PROTOCOL_VERSION_82 &&
-		    buddy->status_msg) {
-			len += min(STATUSMSG_MAX, strlen(buddy->status_msg));
-			memcpy(buf + 8, buddy->status_msg, len - 8);
-		}
+	if ((buddy = ht_get_ptr_nc(uid_to_context, uid_str)))
+		pkt = mk_statuschange(ctx, uid, buddy->status, buddy->status_msg);
+	else {
+		status = i_blocked_user(ctx, uid) ? STATUS_BLOCKED : STATUS_OFFLINE;
+		pkt = mk_statuschange(ctx, uid, status, NULL);
 	}
 
-	pkt = new_packet(PACKET_BUDDY_STATUSCHANGE, len, buf, PACKET_F_COPY);
 	send_packet(ctx, pkt);
 	return 0;
 }
@@ -137,33 +147,10 @@ void send_buddy_list(struct pt_context *ctx, int blocked)
  */
 void broadcast_status(struct pt_context *ctx)
 {
-	char buf[max(64, 8 + STATUSMSG_MAX)];
-	void *ud[3];
-	size_t len = 8;
-
-	buf[0] = (ctx->uid >> 24) & 0xff;
-	buf[1] = (ctx->uid >> 16) & 0xff;
-	buf[2] = (ctx->uid >> 8)  & 0xff;
-	buf[3] = ctx->uid & 0xff;
-	buf[4] = (ctx->status >> 24) & 0xff;
-	buf[5] = (ctx->status >> 16) & 0xff;
-	buf[6] = (ctx->status >> 8) & 0xff;
-	buf[7] = ctx->status & 0xff;
-
-	if (ctx->status != STATUS_ONLINE && ctx->status_msg) {
-		len += min(STATUSMSG_MAX, strlen(ctx->status_msg));
-		memcpy(buf + 8, ctx->status_msg, len - 8);
-	}
-
-	ud[0] = ctx;
-	ud[1] = new_packet(PACKET_BUDDY_STATUSCHANGE, 8, buf, PACKET_F_COPY);
-	ud[2] = new_packet(PACKET_BUDDY_STATUSCHANGE, len, buf, PACKET_F_COPY);
+	char buf[64];
 	sprintf(buf, "SELECT buddy FROM buddylist WHERE uid=%ld", ctx->uid);
-	db_exec(ctx->db_r, ud, buf, do_broadcast_status);
-
-	/* If these weren't used, free them instantly */
-	free_packet(ud[1]);
-	free_packet(ud[2]);
+	db_exec(ctx->db_r, ctx, buf, do_broadcast_status);
+	send_packet(ctx, mk_statuschange(ctx, ctx->uid, ctx->status, ctx->status_msg));
 }
 
 /**

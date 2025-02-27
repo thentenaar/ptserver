@@ -178,6 +178,7 @@ void general_transition(struct pt_context *ctx)
 	 * Subcategory list
 	 */
 	if (ctx->protocol_version >= PROTOCOL_VERSION_82) {
+		s = NULL;
 		strcpy(buf, "SELECT catg, subcatg, disp, name FROM subcategories "
 		            "ORDER BY name ASC");
 		if (!db_exec(ctx->db_r, &s, buf, db_row_to_record) && s)
@@ -185,7 +186,7 @@ void general_transition(struct pt_context *ctx)
 	}
 
 	/**
-	 * Buddylist and Blocklist (TODO: 9.1 crashes when getting STATUSCHANGE)
+	 * Buddylist and Blocklist
 	 */
 	send_buddy_list(ctx, 0);
 	send_buddy_list(ctx, 1);
@@ -408,17 +409,7 @@ void general_flow(struct pt_context *ctx)
 		send_packet(ctx, pkt);
 
 		/* In case they're still in the buddylist */
-		buf[0] = (uid >> 24) & 0xff;
-		buf[1] = (uid >> 16) & 0xff;
-		buf[2] = (uid >> 8)  & 0xff;
-		buf[3] = uid & 0xff;
-		buf[4] = (char)((STATUS_BLOCKED >> 24) & 0xff);
-		buf[5] = (char)((STATUS_BLOCKED >> 16) & 0xff);
-		buf[6] = (char)((STATUS_BLOCKED >> 8) & 0xff);
-		buf[7] = (char)(STATUS_BLOCKED & 0xff);
-
-		pkt = new_packet(PACKET_BUDDY_STATUSCHANGE, 8, buf, PACKET_F_COPY);
-		send_packet(ctx, pkt);
+		send_buddy_list(ctx, 1);
 		break;
 	case PACKET_UNBLOCK_BUDDY:
 		/**
