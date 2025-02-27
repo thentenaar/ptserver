@@ -90,7 +90,7 @@ void login_flow(struct pt_context *ctx)
 		break;
 	case PACKET_INITIAL_STATUS_2:
 		/**
-		 * [PT 7/8] Alternative to INITIAL_STATUS.
+		 * PT 7+: Alternative to INITIAL_STATUS.
 		 * Maybe as a guest user? Not sure how this gets triggered,
 		 * so we'll otherwise ignore this until more is known about
 		 * its intent.
@@ -137,7 +137,7 @@ void login_flow(struct pt_context *ctx)
 		if (ctx->pkt_in.version < PROTOCOL_VERSION_82) {
 			/**
 			 * Data [out]: PT 5.1 / 7.0
-			 *   0 - 3  : ignored [PT7: these cannot be null bytes]
+			 *   0 - 3  : ignored [PT 7: these cannot be zeroes]
 			 *   4 - x  : challenge (only first three digits used)
 			 * Optional:
 			 *   x+1    : "\n"
