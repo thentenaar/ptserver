@@ -161,7 +161,7 @@ void login_flow(struct pt_context *ctx)
 			 * PT 8.2 adds the new codebook stuff
 			 */
 			pt_encode_cook_codebook(ctx);
-			buf = calloc(21 + (s ? strlen(s) + 2 : 0), 1);
+			buf = calloc(21 + (s ? strlen(s) + 1 : 0), 1);
 
 			buf[0] = (ctx->cb1_offset >> 8) & 0xff;
 			buf[1] = ctx->cb1_offset & 0xff;
@@ -176,8 +176,12 @@ void login_flow(struct pt_context *ctx)
 			buf[17] = '0' + rand() % 10;
 			ustoa((unsigned char *)(buf + 18), ctx->challenge + 0x1fd, 3);
 
-			if (s) memcpy(buf + 21, s, strlen(s));
-			send_packet(ctx, new_packet(PACKET_CHALLENGE, 21 + (s ? strlen(s) : 0), buf, 0));
+			if (s) {
+				buf[21] = '\n';
+				memcpy(buf + 22, s, strlen(s));
+			}
+
+			send_packet(ctx, new_packet(PACKET_CHALLENGE, 21 + (s ? strlen(s) + 1 : 0), buf, 0));
 		}
 
 		free(s);
@@ -239,6 +243,14 @@ void login_flow(struct pt_context *ctx)
 			                 ((ctx->server_ip >> 8)  & 0x0000ff00) |
 			                 ((ctx->server_ip >> 24) & 0x000000ff);
 			free(buf);
+		}
+
+		/* TODO: determine what this number is (v1 encoded) */
+		if (ctx->protocol_version >= PROTOCOL_VERSION_102) {
+			if ((buf = pt_decode(ctx, 1, strtok(NULL, "\n")))) {
+				DEBUG(("login: The number is: %s\n", buf));
+				free(buf);
+			}
 		}
 
 		/* Check the question response if we have one */
