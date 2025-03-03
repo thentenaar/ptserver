@@ -32,8 +32,8 @@ void login_transition(struct pt_context *ctx)
 
 void login_flow(struct pt_context *ctx)
 {
-	char *buf = NULL;
-	char *s;
+	int i;
+	char *s, *buf = NULL;
 	unsigned pass_ok;
 	unsigned long uid = 0;
 	size_t len;
@@ -91,37 +91,51 @@ void login_flow(struct pt_context *ctx)
 	case PACKET_INITIAL_STATUS_2:
 		/**
 		 * PT 7+: Alternative to INITIAL_STATUS.
+		 *
 		 * Maybe as a guest user? Not sure how this gets triggered,
 		 * so we'll otherwise ignore this until more is known about
-		 * its intent.
+		 * its intent. Certainly, it's sent after the challenge has
+		 * been received.
 		 *
 		 * Data:
 		 *   0 - 3: uid (32 bits)
-		 *   4 - 7: status? (32-bits)
+		 *   4 - 7: status (32 bits)
 		 *   8 - 11: 00 00 00 01 (constant)
 		 *   12 - *: unknown file checksum (v1 encoded)
+		 *           '\n' fs serial    (v1 encoded)
+		 *           '\n' unknown long (v1 encoded)
 		 */
+		ctx->status = ((ctx->pkt_in.data[4] & 0xff) << 24) |
+		              ((ctx->pkt_in.data[5] & 0xff) << 16) |
+		              ((ctx->pkt_in.data[6] & 0xff) << 8)  |
+		               (ctx->pkt_in.data[7] & 0xff);
+
+		if ((s = strchr(ctx->pkt_in.data + 12, '\n'))) {
+			if ((buf = strchr(s, '\n'))) *buf = '\0';
+			ctx->device_id = pt_decode(ctx, 1, s);
+		}
 	case PACKET_INITIAL_STATUS:
 		/**
 		 * Data:
 		 *   0  -  3: uid (32 bits)
 		 *   4  -  7: 00 00 00 01 (constant)
-		 *   8  -  9: 00 00 [PT 7/8: 00 02] (5.1: value of notANewUser reg. entry)
+		 *   8  -  9: 00 00 [PT 7 - 9.2: 00 02, 10.2+: 04 09 00 02] (5.1: value of notANewUser reg. entry)
 		 *   10 - 13: 00 00 00 1e (Initial Status: Online/Away/DND/Invisible)
 		 *   14 -  *: encoded fs serial (v1, challenge of uid % 0x37)
 		 *
 		 * This may also send a return_code.
 		 */
-		len = (ctx->pkt_in.type == PACKET_INITIAL_STATUS) ? 6 : 0;
-		ctx->status = ((ctx->pkt_in.data[10 - len] & 0xff) << 24) |
-		              ((ctx->pkt_in.data[11 - len] & 0xff) << 16) |
-		              ((ctx->pkt_in.data[12 - len] & 0xff) << 8)  |
-		               (ctx->pkt_in.data[13 - len] & 0xff);
-
-		if (ctx->pkt_in.type == PACKET_INITIAL_STATUS)
-			ctx->device_id = pt_decode_with_challenge(ctx, 1, ctx->uid % 0x37, ctx->pkt_in.data + 14);
 		ctx->uid = uid;
 		ctx->protocol_version = ctx->pkt_in.version;
+		i = ctx->protocol_version >= PROTOCOL_VERSION_10 ? -2 : 0;
+
+		if (ctx->pkt_in.type == PACKET_INITIAL_STATUS) {
+			ctx->status = ((ctx->pkt_in.data[10 - i] & 0xff) << 24) |
+			              ((ctx->pkt_in.data[11 - i] & 0xff) << 16) |
+			              ((ctx->pkt_in.data[12 - i] & 0xff) << 8)  |
+			               (ctx->pkt_in.data[13 - i] & 0xff);
+			ctx->device_id = pt_decode_with_challenge(ctx, 1, ctx->uid % 0x37, ctx->pkt_in.data + 14 - i);
+		}
 
 		/* An error on INITIAL_STATUS causes 5.1 to exit (intentionally.) */
 		if (lookup_user(ctx->db_r, ctx->uid, &ctx->user)) {
@@ -246,7 +260,7 @@ void login_flow(struct pt_context *ctx)
 		}
 
 		/* TODO: determine what this number is (v1 encoded) */
-		if (ctx->protocol_version >= PROTOCOL_VERSION_102) {
+		if (ctx->protocol_version >= PROTOCOL_VERSION_10) {
 			if ((buf = pt_decode(ctx, 1, strtok(NULL, "\n")))) {
 				DEBUG(("login: The number is: %s\n", buf));
 				free(buf);

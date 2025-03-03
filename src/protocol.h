@@ -78,10 +78,11 @@
 #define PROTOCOL_VERSION_50  0x0047 /**< Paltalk 5.0        */
 #define PROTOCOL_VERSION_51  0x004b /**< Paltalk 5.1        */
 #define PROTOCOL_VERSION_70  0x004f /**< Paltalk 7.0        */
-#define PROTOCOL_VERSION_80  0x0053 /**< Paltalk 8.0?       */
+#define PROTOCOL_VERSION_80  0x0053 /**< Paltalk 8.0        */
 #define PROTOCOL_VERSION_82  0x0056 /**< Paltalk 8.2        */
 #define PROTOCOL_VERSION_90  0x0057 /**< Paltalk 9.0        */
 #define PROTOCOL_VERSION_91  0x0058 /**< Paltalk 9.1        */
+#define PROTOCOL_VERSION_10  0x0069 /**< Paltalk 10.0       */
 #define PROTOCOL_VERSION_102 0x006f /**< Paltalk 10.2       */
 #define PROTOCOL_VERSION_113 0x007a /**< Paltalk 11.3       */
 #define PROTOCOL_VERSION_118 0x007f /**< Paltalk 11.8       */
