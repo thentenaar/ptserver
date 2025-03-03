@@ -40,7 +40,7 @@ static void *do_video;
 
 static const char * const empty_str = "";
 
-static const char * const rooms_fmt[5] = {
+static const char * const rooms_fmt[6] = {
 	"FROM rooms WHERE catg=%ld ORDER BY '#' DESC, nm ASC",
 	"FROM rooms ORDER BY '#' DESC, nm ASC LIMIT 5",
 	"FROM rooms ORDER BY created DESC, nm ASC LIMIT 5",
@@ -48,10 +48,15 @@ static const char * const rooms_fmt[5] = {
 	"SELECT id,r,p,v,l,c,nm,"
 	"(SELECT COUNT(uid) FROM room_users WHERE id=rooms.id) AS '#' ",
 
-	/* PT 8.2+: Uses the new room list packet (t=S is for subcategories) */
-	"SELECT 'G' AS t,id,nm AS n,r,p,v,l,c,'Y' AS eof,lang,"
+	/* PT 8.2+: New room list packet (category) */
+	"SELECT 'G' AS t,id,nm AS n,r,p,v,l,c,lang,"
 	"(SELECT COUNT(uid) FROM room_users WHERE id=rooms.id) AS m "
 	"FROM rooms WHERE catg=%ld AND subcatg IS NULL ORDER BY m DESC, n ASC",
+
+	/* PT 8.2+: New room list packet (subcategory) */
+	"SELECT 'G' AS t,id,nm AS n,r,p,v,l,c,lang,"
+	"(SELECT COUNT(uid) FROM room_users WHERE id=rooms.id) AS m "
+	"FROM rooms WHERE catg=%ld AND subcatg=%ld ORDER BY m DESC, n ASC"
 };
 
 /**
@@ -109,13 +114,7 @@ char *rooms_for_subcategory(void *db_r, unsigned long catid, unsigned long scid)
 {
 	char buf[512], *s = NULL;
 
-	sprintf(
-		buf,
-		"SELECT 'G' AS t, subcatg AS sc,id,nm AS n,r,p,v,l,c,"
-		"(SELECT COUNT(uid) FROM room_users WHERE id=rooms.id) AS m,"
-		"'Y' AS eof, lang FROM rooms WHERE catg=%ld AND subcatg=%ld ORDER BY nm DESC, n ASC",
-		catid, scid);
-
+	sprintf(buf, rooms_fmt[5], catid, scid);
 	if (db_exec(db_r, &s, buf, db_row_to_record)) {
 		free(s);
 		return NULL;

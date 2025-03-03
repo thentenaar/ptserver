@@ -248,7 +248,7 @@
 //#define 0xfeab /* PT 10.2+: "groupWhisper" TODO: investigate */
 //#define 0xfeac /* PT 9.0+: Unknown [Unused?] TODO: investigate 11.8: "groupMembers" */
 #define PACKET_LIST_SUBCATEGORY         0xfeaf /* PT 8.2+: List rooms in a subcategory. data: category_id, subcategory_id */
-#define PACKET_NEW_LIST_CATEGORY        0xfeb0 /* PT8+: simplification of the older LIST_CATEGORY. data: category_id */
+#define PACKET_NEW_LIST_CATEGORY        0xfeb0 /* PT 8.2+: simplification of the older LIST_CATEGORY. data: category_id */
 //#define 0xfeb1 /* PT 8+: Unknown 0-length TODO: investigate */
 #define PACKET_LIST_CATEGORY            0xfeb6
 #define PACKET_ROOM_LEAVE               0xfec0
@@ -329,7 +329,7 @@
 #define PACKET_ROOM_LIST                0x014c /* List of rooms for a requested category */
 //#define 0x014f /* PT 9+: 0xc8 list of c=long\nnm=string TODO: investigate */
 #define PACKET_NEW_ROOM_LIST            0x0150 /* PT 8.2+: New room list for a category    */
-#define PACKET_SUBCATEGORY_ROOM_LIST    0x0151 /* PT 8.2+: List of rooms for a subcategory */
+#define PACKET_SUBCATEGORY_ROOM_LIST    0x0151 /* PT 8.2 - 9.x: List of rooms for a subcategory */
 #define PACKET_ROOM_USERLIST            0x0154
 #define PACKET_ROOM_MESSAGE_IN          0x015e
 #define PACKET_ROOM_TOPIC               0x015f

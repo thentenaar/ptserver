@@ -313,8 +313,14 @@ void general_flow(struct pt_context *ctx)
 			  ((ctx->pkt_in.data[5] & 0xff) << 16) |
 			  ((ctx->pkt_in.data[6] & 0xff) <<  8) |
 			   (ctx->pkt_in.data[7] & 0xff);
-		if ((s = rooms_for_subcategory(ctx->db_r, uid, rid)))
-			send_packet(ctx, new_packet(PACKET_SUBCATEGORY_ROOM_LIST, strlen(s), s, 0));
+
+		if ((s = rooms_for_subcategory(ctx->db_r, uid, rid))) {
+			send_packet(ctx, new_packet(
+			    (ctx->protocol_version >= PROTOCOL_VERSION_82)
+			    ? PACKET_NEW_ROOM_LIST : PACKET_SUBCATEGORY_ROOM_LIST,
+			    strlen(s), s, 0)
+			);
+		}
 		break;
 	case PACKET_SEND_GLOBAL_NUMBERS:
 		/**
