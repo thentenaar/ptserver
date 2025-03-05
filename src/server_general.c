@@ -1,3 +1,11 @@
+/**
+ * ptserver - A server for the Paltalk protocol
+ * Copyright (C) 2004 - 2025 Tim Hentenaar.
+ *
+ * This code is licensed under the Simplified BSD License.
+ * See the LICENSE file for details.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,6 +19,7 @@
 #include "database.h"
 #include "room.h"
 #include "buddylist.h"
+#include "ft.h"
 #include "server_handler.h"
 
 /* from server.c */
@@ -19,12 +28,19 @@ extern struct ht *uid_to_context;
 /* Prepared queries on db_w */
 static void *offline_msg;
 
-#define SUCCESS_LEN            7
-#define NXUSER_LEN            12
-#define CANT_BLOCK_ADMINS_LEN 40
-static const char * const success           = "Success";
-static const char * const nxuser            = "No such user";
-static const char * const cant_block_admins = "You can't block staff or administrators";
+#define SUCCESS_LEN                7
+#define NXUSER_LEN                12
+#define CANT_BLOCK_ADMINS_LEN     40
+#define SENDER_OFFLINE_LEN        17
+#define ERROR_SENDING_REQUEST_LEN 21
+#define TOO_MANY_TRANSFERS_LEN    23
+
+static const char * const success               = "Success";
+static const char * const nxuser                = "No such user";
+static const char * const cant_block_admins     = "You can't block staff or administrators";
+static const char * const sender_offline        = "Sender is offline";
+static const char * const error_sending_request = "Error sending request";
+static const char * const too_many_transfers    = "Too many file transfers";
 
 /**
  * Non-zero if the given user exists, and isn't blocking us, or blocked by us
@@ -124,7 +140,7 @@ static int send_global_numbers(void *userdata, int cols, char *val[], char *col[
  */
 void general_transition(struct pt_context *ctx)
 {
-	char buf[1024]/*256] */, *s, *s2;
+	char buf[1024], *s, *s2;
 
 	/****
 	 * Send USER_DATA
@@ -527,7 +543,6 @@ void general_flow(struct pt_context *ctx)
 		 *   0 - 3: Recipient UID (32 bits)
 		 *   4 - *: Message
 		 */
-
 		if (!can_send_to_user(ctx, uid))
 			break;
 
@@ -806,6 +821,88 @@ void general_flow(struct pt_context *ctx)
 		 *   4 - 5: 00 00 - off, 00 01 - on
 		 */
 		reddot_video(ctx, uid, ctx->pkt_in.data[4] | ctx->pkt_in.data[5]);
+		break;
+	case PACKET_DCC_XFER_INIT:
+		/**
+		 * [PT 5.x] Data:
+		 *   0 - 3: uid
+		 *   4 - 5: port (2090 - hard coded)
+		 */
+	case PACKET_FILE_XFER_INIT:
+	case PACKET_IMG_XFER_INIT:
+		/**
+		 * Data:
+		 *   0 - 3: target uid
+		 *   4 - *: filename
+		 *
+		 * To target:
+		 *   0 - 3: sender uid
+		 *   4 - 7: xfer id
+		 *   8 - *: filename \n nickname
+		 */
+		sprintf(buf, "%lu", uid);
+		rid  = !can_send_to_user(ctx, uid);
+		rid |= !(target = ht_get_ptr_nc(uid_to_context, buf)) << 1;
+		rid |= (target && !is_buddy(target, ctx->uid) && (*target->user.privacy != 'A')) << 2;
+		if (rid || ft_xfer_init(ctx, target)) {
+			if (ctx->pkt_in.type == PACKET_DCC_XFER_INIT) {
+				ctx->pkt_in.type = PACKET_DCC_XFER_REJECTED;
+				send_packet(ctx, &ctx->pkt_in);
+			} else {
+				memcpy(buf, ctx->pkt_in.data, 4);
+				memset(buf + 4, 0, 4);
+				memcpy(buf + 8, error_sending_request, ERROR_SENDING_REQUEST_LEN);
+				send_packet(ctx, new_packet(PACKET_FILE_XFER_ERROR, 8 + ERROR_SENDING_REQUEST_LEN, buf, PACKET_F_COPY));
+			}
+		}
+		break;
+	case PACKET_DCC_XFER_ACCEPT:
+		/**
+		 * [PT 5.x] Data:
+		 *   0 - 3: uid
+		 *   4 - 5: port
+		 */
+	case PACKET_FILE_XFER_ACCEPT:
+		/**
+		 * Data:
+		 *   0 - 3: sender_uid
+		 *   4 - 7: xfer id
+		 *   8 - 9: 00 00 - rejected 00 01 - accepted
+		 *
+		 * Affirmative Reply: (to both parties)
+		 *   0 - 3: sender_uid
+		 *   4 - 7: xfer id
+		 *   8 - 9: 00 00 - receive 00 01 - send
+		 *   10 - 13: ipaddr
+		 *   14 - 15: port
+		 *
+		 * Negative Reply:
+		 *   0 - 3: sender uid
+		 *   4 - 7: xfer id
+		 */
+		sprintf(buf, "%lu", uid);
+		rid  = !can_send_to_user(ctx, uid);
+		rid |= !(target = ht_get_ptr_nc(uid_to_context, buf)) << 1;
+		rid |= (target && !is_buddy(target, ctx->uid) && (*target->user.privacy != 'A')) << 2;
+		if (rid || ft_xfer_accept(target, ctx)) {
+			if (ctx->protocol_version >= PROTOCOL_VERSION_70) {
+				memcpy(buf, ctx->pkt_in.data, 8);
+				memcpy(buf + 8, sender_offline, SENDER_OFFLINE_LEN);
+				send_packet(ctx, new_packet(PACKET_FILE_XFER_ERROR, 8 + SENDER_OFFLINE_LEN, buf, PACKET_F_COPY));
+			}
+		}
+		break;
+	case PACKET_DCC_XFER_REJECT:
+		/**
+		 * [PT 5.x] Data:
+		 *   0 - 3: uid
+		 */
+		sprintf(buf, "%lu", uid);
+		rid  = !can_send_to_user(ctx, uid);
+		rid |= !(target = ht_get_ptr_nc(uid_to_context, buf)) << 1;
+		rid |= (target && !is_buddy(target, ctx->uid) && (*target->user.privacy != 'A')) << 2;
+		if (!rid)
+			ft_xfer_reject(target, ctx);
 		break;
 
 	/**

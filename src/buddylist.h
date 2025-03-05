@@ -1,6 +1,6 @@
 /**
  * ptserver - A server for the Paltalk protocol
- * Copyright (C) 2004 - 2024 Tim Hentenaar.
+ * Copyright (C) 2004 - 2025 Tim Hentenaar.
  *
  * This code is licensed under the Simplified BSD License.
  * See the LICENSE file for details.
@@ -59,5 +59,10 @@ int user_blocked_me(struct pt_context *ctx, unsigned long uid);
  * Non-zero if the given user is on \a ctx's blocklist
  */
 int i_blocked_user(struct pt_context *ctx, unsigned long uid);
+
+/**
+ * Non-zero if the given user in on \a ctx's buddylist
+ */
+int is_buddy(struct pt_context *ctx, unsigned long uid);
 
 #endif /* BUDDYLIST_H */

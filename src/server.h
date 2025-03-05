@@ -1,6 +1,6 @@
 /**
  * ptserver - A server for the Paltalk protocol
- * Copyright (C) 2004 - 2024 Tim Hentenaar.
+ * Copyright (C) 2004 - 2025 Tim Hentenaar.
  *
  * This code is licensed under the Simplified BSD License.
  * See the LICENSE file for details.
@@ -11,9 +11,9 @@
 #include "packet.h"
 
 /**
- * Maximum number of client connections to the server
+ * Absolute maximum number of client connections to the server
  */
-#define MAX_CONNECTIONS 10240
+#define MAX_CONNECTIONS 2048
 
 /**
  * Send a packet to all connected users

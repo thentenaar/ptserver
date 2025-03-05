@@ -1,10 +1,11 @@
 /**
  * ptserver - A server for the Paltalk protocol
- * Copyright (C) 2004 - 2024 Tim Hentenaar.
+ * Copyright (C) 2004 - 2025 Tim Hentenaar.
  *
  * This code is licensed under the Simplified BSD License.
  * See the LICENSE file for details.
  */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,6 +24,7 @@ static void *q_remove_buddy;
 static void *q_block_buddy;
 static void *q_unblock_buddy;
 static void *blocked_user;
+static void *user_is_buddy;
 static void *set_disp_name;
 
 /* from server.c */
@@ -296,8 +298,7 @@ int user_blocked_me(struct pt_context *ctx, unsigned long uid)
 
 	db_reset_prepared(blocked_user);
 	db_bind(blocked_user, "ii", uid, ctx->uid);
-	ret = db_get_count(blocked_user);
-	return !!ret;
+	return !!db_get_count(blocked_user);
 }
 
 /**
@@ -305,8 +306,6 @@ int user_blocked_me(struct pt_context *ctx, unsigned long uid)
  */
 int i_blocked_user(struct pt_context *ctx, unsigned long uid)
 {
-	int ret = 0;
-
 	if (!blocked_user) {
 		blocked_user = db_prepare(
 			ctx->db_w,
@@ -321,7 +320,28 @@ int i_blocked_user(struct pt_context *ctx, unsigned long uid)
 
 	db_reset_prepared(blocked_user);
 	db_bind(blocked_user, "ii", ctx->uid, uid);
-	ret = db_get_count(blocked_user);
-	return !!ret;
+	return !!db_get_count(blocked_user);
+}
+
+/**
+ * Non-zero if the given user in on \a ctx's buddylist
+ */
+int is_buddy(struct pt_context *ctx, unsigned long uid)
+{
+	if (!user_is_buddy) {
+		user_is_buddy = db_prepare(
+			ctx->db_w,
+			"SELECT COUNT(*) FROM buddylist WHERE uid=? AND buddy=?"
+		);
+
+		if (!user_is_buddy) {
+			ERROR(("is_buddy: Failed to prepare query"));
+			return 0;
+		}
+	}
+
+	db_reset_prepared(user_is_buddy);
+	db_bind(user_is_buddy, "ii", ctx->uid, uid);
+	return !!db_get_count(user_is_buddy);
 }
 

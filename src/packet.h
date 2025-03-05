@@ -1,6 +1,6 @@
 /**
  * ptserver - A server for the Paltalk protocol
- * Copyright (C) 2004 - 2024 Tim Hentenaar.
+ * Copyright (C) 2004 - 2025 Tim Hentenaar.
  *
  * This code is licensed under the Simplified BSD License.
  * See the LICENSE file for details.
@@ -55,11 +55,6 @@ struct pt_context {
 	void *db_w;
 	struct user user;
 
-/*
-	time_t last_pkt_in;
-	time_t last_pkt_out;
-*/
-
 	time_t time;
 	unsigned short protocol_version;
 	unsigned short challenge;
@@ -70,6 +65,7 @@ struct pt_context {
 	unsigned long uid;
 	char uid_str[11];
 	in_addr_t server_ip; /**< IP according to the client, little endian */
+	unsigned long next_ftid; /**< Next file xfer id */
 
 	/* 8.2 codebook params */
 	unsigned short cb1_offset; /**< Offset into the first codebook data */
