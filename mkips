@@ -1,0 +1,41 @@
+#!/bin/bash
+#
+# Convert the patch tables on the wiki page into IPS patches
+#
+# Assumes the wiki is cloned to ./.wiki
+#
+
+version=
+filename=
+
+mkdir -p patch
+while read -r line
+do
+	case $line in
+	"## Paltalk "*)  version=${line##* }                                 ;;
+	"Build Number"*) filename="patch/paltalk-${version}.${line##* }.ips" ;;
+	"| Offset"*)     printf "PATCH" > $filename || exit 1                ;;
+	"| 0x"*)
+		# Patch records
+		# Address (24-bits), Size (16-bits), bytes
+		IFS="|" fields=(${line}) ; unset IFS
+		addr=${fields[1]}
+		bytes=(${fields[3]})
+		printf \
+			"$(printf "\\\x%02x\\\x%02x\\\x%02x\\\x%02x\\\x%02x" \
+			$(((addr >> 16) & 0xff)) $(((addr >> 8) & 0xff))     \
+			$((addr & 0xff)) $(((${#bytes[@]} >> 8) & 0xff))    \
+			$((${#bytes[@]} & 0xff)))" >> $filename
+		for b in ${bytes[*]}
+		do
+			printf "\x${b}" >> $filename
+		done
+		;;
+	"</details>")
+		printf "EOF" >> $filename
+		version=
+		filename=
+		;;
+	esac
+done < .wiki/Client-Versions.md
+
