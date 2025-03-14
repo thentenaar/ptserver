@@ -1,3 +1,11 @@
+/**
+ * ptserver - A server for the Paltalk protocol
+ * Copyright (C) 2004 - 2025 Tim Hentenaar.
+ *
+ * This code is licensed under the Simplified BSD License.
+ * See the LICENSE file for details.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

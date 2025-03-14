@@ -1,3 +1,11 @@
+/**
+ * ptserver - A server for the Paltalk protocol
+ * Copyright (C) 2004 - 2025 Tim Hentenaar.
+ *
+ * This code is licensed under the Simplified BSD License.
+ * See the LICENSE file for details.
+ */
+
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
@@ -12,8 +20,6 @@
 
 /* from server.c */
 extern struct ht *uid_to_context;
-
-// https://web.archive.org/web/20050501000000*/http://download.paltalk.com:80/download/0.x/pal_install.exe
 
 /**
  * Send a return code packet back to the client.
