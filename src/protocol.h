@@ -70,7 +70,7 @@
  * but, the copy of 11.8 that I have indeed checks that it's <= 0x7f,
  * presumably signaling that 11.8 is the final version to be produced.
  *
- * NB: 11.8 also changes the packet structure to have a 32-bit length
+ * NB: 11.7 changes the packet structure to have a 32-bit length field
  * field, despite rejecting any incoming packet with a length larger than
  * 16 bits. 11.3 still uses the standard 16-bit length field.
  */
@@ -85,7 +85,7 @@
 #define PROTOCOL_VERSION_10  0x0069 /**< Paltalk 10.0       */
 #define PROTOCOL_VERSION_102 0x006f /**< Paltalk 10.2       */
 #define PROTOCOL_VERSION_113 0x007a /**< Paltalk 11.3       */
-#define PROTOCOL_VERSION_118 0x007f /**< Paltalk 11.8       */
+#define PROTOCOL_VERSION_117 0x007f /**< Paltalk 11.7       */
 
 /**
  * Paltak packet types: client -> server
