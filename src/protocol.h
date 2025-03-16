@@ -276,7 +276,7 @@
 #define PACKET_REGISTRATION_ADINFO      0xff7e /* PT8/9: [registration] advertising-related settings */
 #define PACKET_CLIENT_HELLO             0xff9b
 //#define 0xff9c /* PT 9+: Unknown [Unused?] TODO: investigate 11.8: "IntroduceUid" */
-//#define 0xffa2 /* PT 11.8: "GetLanguages" TODO: investigate */
+#define PACKET_GET_LANGUAGES            0xffa2 /* PT 11.7: "GetLanguages" 0-length */
 //#define 0xffa3 /* PT 11.8: "GetGroupRecentlyVisited" TODO: investigate */
 //#define 0xffac /* PT 9+: "GroupFavoritesRemove" TODO: investigate */
 //#define 0xffad /* PT 11.8: "GroupFavoritesAdd" TODO: investigate */
@@ -291,7 +291,7 @@
 #define PACKET_ADD_BUDDY                0xffbd
 #define PACKET_REMOVE_BUDDY             0xffbe
 #define PACKET_UPDATE_PROFILE           0xffbf /* PT5: Sent by the alter user info dialog; the return code is referenced in 7/8. TODO: return code? */
-//#define 0xffc6 /* PT 11.8: "ShowGroupsIn" Show others which room I'm in. data: 'Y' or 'N' */
+//#define 0xffc6 /* PT 11.7: "ShowGroupsIn" Show others which room I'm in. data: 'Y' or 'N' */
 #define PACKET_PERSONALS_MSG_OUT        0xffe6 /* PT5: Personals message reply. data: dw1, dw2, recipient_uid, sender_uid, message */
 //#define 0xffe7 /* PT 9.0+: Unknown [Unused?] TODO: investigate 11.8: "SendGetPalProfileMsgs" */
 #define PACKET_IM_OUT                   0xffec
@@ -306,7 +306,7 @@
                                                /* buttons=int;button1=text;button2=text;button3=text;url1=text;url2=text;url3=text;msg=text */
                                                /* ignored in 9.0 */
 #define PACKET_KICKUSER                 0x002a /* Display an annoucement and exit */
-#define PACKET_SERVER_PUSH_MSG          0x0034  /* PT 9.1+: Newer variant of FORCE_IM fields: uid=long, ctr=long, indx=long, msg=str */
+#define PACKET_SERVER_PUSH_MSG          0x0034 /* PT 9.1+: Newer variant of FORCE_IM fields: uid=long, ctr=long, indx=long, msg=str */
 #define PACKET_BUDDY_REMOVED            0x0042
 #define PACKET_BUDDY_LIST               0x0043
 #define PACKET_SEARCH_RESULTS2          0x0044 /* Handled the same as 0x0045 */
@@ -477,7 +477,7 @@
 //#define 0x0018 /* PT 11.8: "MessageJSONOut" TODO: investigate */
 //#define 0x0055 /* PT 11.8: "GroupFavoritesListOut" TODO: investigate */
 //#define 0x005d /* PT 11.8: "GetGroupRecentlyVisitedOut" TODO: investigate */
-//#define 0x005e /* PT 11.8: "GetLanguagesOut" TODO: investigate */
+#define PACKET_LANGUAGES                0x005e /* PT 11.7: "GetLanguagesOut" JSON body, "network error" if not sent */
 //#define 0x0105 /* PT 11.8: "GetMultimediaResourceOut" TODO investigate */
 //#define 0x0212 /* PT 11.8: "OneOnOneCallInviteOut" TODO: investigate */
 //#define 0x0213 /* PT 11.8: "OneOnOneCallInviteReplyOut" TODO: investigate */

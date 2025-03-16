@@ -31,6 +31,95 @@ static void *set_disp_name;
 extern struct ht *uid_to_context;
 
 /**
+ * Get the buffer size needed to hold the escaped version of \a s
+ *
+ * Here, we assume that \a s is null-terminated, and that everything in
+ * \a s represents a valid JSON string aside from the usual escapes.
+ */
+static size_t jsonesc_len(const char *s)
+{
+	size_t len = 0;
+
+	while (s && *s) {
+		switch (*s++) {
+		case '\b':
+		case '\f':
+		case '\n':
+		case '\r':
+		case '\t':
+		case '\\':
+			++len;
+		default:
+			++len;
+		}
+	}
+
+	return len;
+}
+
+/**
+ * Perform the usual basic escapes on \a s
+ */
+static char *jsonesc(const char *s)
+{
+	char *buf, c;
+	size_t len, i = 0;
+
+	if (!(len = jsonesc_len(s)) || !(buf = malloc(len + 1)))
+		return NULL;
+
+	while (*s) {
+		switch ((c = *s++)) {
+		case '\b':
+			buf[i++] = '\\';
+			buf[i++] = 'b';
+			break;
+		case '\f':
+			buf[i++] = '\\';
+			buf[i++] = 'f';
+			break;
+		case '\n':
+			buf[i++] = '\\';
+			buf[i++] = 'n';
+			break;
+		case '\r':
+			buf[i++] = '\\';
+			buf[i++] = 'r';
+			break;
+		case '\t':
+			buf[i++] = '\\';
+			buf[i++] = 't';
+			break;
+		default:
+			buf[i++] = c;
+		}
+	}
+
+	buf[i++] = '\0';
+	return buf;
+}
+
+static struct pt_packet *mk_statuschange_json(struct pt_context *ctx, unsigned long uid, unsigned long status, const char *msg)
+{
+	int len;
+	char *buf, *mbuf = NULL;
+
+	if (!(buf = malloc(jsonesc_len(msg) + 100)))
+		abort();
+
+	if (msg && *msg && !(mbuf = jsonesc(msg))) {
+		free(buf);
+		abort();
+	}
+
+	len = sprintf(buf,
+	             "{\"user_id\":%lu,\"state\":%lu,\",away_mesg\":\"%s\",\"crown_level\":1}",
+	             uid, status, mbuf ? mbuf : "");
+	if (mbuf) free(mbuf);
+	return new_packet(PACKET_BUDDY_STATUSCHANGE, len, buf, 0);
+}
+
+/**
  * Construct a STATUSCHANGE packet based on the recipient's protocol
  * version
  */
@@ -38,6 +127,10 @@ static struct pt_packet *mk_statuschange(struct pt_context *ctx, unsigned long u
 {
 	char buf[14 + STATUSMSG_MAX];
 	size_t msglen, len = 8;
+
+	/* 11.7+ uses JSON for this... :/ */
+	if (ctx->pkt_in.version >= PROTOCOL_VERSION_117)
+		return mk_statuschange_json(ctx, uid, status, msg);
 
 	buf[0] = (uid >> 24) & 0xff;
 	buf[1] = (uid >> 16) & 0xff;

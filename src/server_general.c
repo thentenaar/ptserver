@@ -256,6 +256,23 @@ void general_flow(struct pt_context *ctx)
 		buf[3] = rid & 0xff;
 		send_packet(ctx, new_packet(PACKET_PONG, 4, buf, PACKET_F_COPY));
 		break;
+	case PACKET_GET_LANGUAGES:
+		/**
+		 * PT 11.7: The reply body is JSON.
+		 *
+		 * An empty object is treated as successful.
+		 *
+		 * Seems to expect:
+		 * {
+		 *   "data": {
+		 *     "list": [
+		 *       ???
+		 *     ]
+		 *   }
+		 * }
+		 */
+		send_packet(ctx, new_packet(PACKET_LANGUAGES, 2, "{}", PACKET_F_COPY));
+		break;
 	case PACKET_SET_PRIVACY:
 		/**
 		 * Set the user's privacy setting
@@ -355,6 +372,7 @@ void general_flow(struct pt_context *ctx)
 		 * PT 8.2 has an optional status message following the status.
 		 * PT 9.1 always includes the status message, with a preceeding byte.
 		 *        TODO: figure out what that preceeding byte is.
+		 * PT 10.2 no longer includes the extra byte.
 		 */
 		ctx->status = uid;
 		if (ctx->pkt_in.version >= PROTOCOL_VERSION_82) {
@@ -363,7 +381,8 @@ void general_flow(struct pt_context *ctx)
 				ctx->status_msg = NULL;
 			}
 
-			rid = 4 + (ctx->pkt_in.version >= PROTOCOL_VERSION_91);
+			rid = 4 + (ctx->pkt_in.version >= PROTOCOL_VERSION_91 &&
+			           ctx->pkt_in.version < PROTOCOL_VERSION_102);
 			if (ctx->pkt_in.length > rid) {
 				len = min(STATUSMSG_MAX, ctx->pkt_in.length - rid);
 				if (!(ctx->status_msg = calloc(len + 1, 1)))

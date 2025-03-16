@@ -335,6 +335,17 @@ void login_flow(struct pt_context *ctx)
 		 *   	- MSN Messenger ID (or "-1") (variant 2 encoded)
 		 *   	- Yahoo User ID (or "-1") (variant 2 encoded)
 		 *   	- IE Product ID (variant 2 encoded) ["51873-335-9659427-09862"]
+		 *
+		 * 11.3:
+		 *  0   -  15: ???
+		 *  16  -  19: Client control ban level
+		 *  20  -  21: Number of PalTalk accounts
+		 *  22  -   *: Account UIDs (32-bits)
+		 *  *+1 - *+2: ???
+		 *  *+3 - *+6: server ip address
+		 *  *+7 - *+8: server port
+		 *  *+9 - ***: Comma separated list
+		 *
 		 */
 		break;
 	case PACKET_REGISTRATION_ADINFO:
