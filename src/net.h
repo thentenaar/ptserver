@@ -11,6 +11,11 @@
 #include <netinet/in.h>
 
 /**
+ * Absolute max number of connections
+ */
+#define MAX_CONN 8192
+
+/**
  * Connection flags
  */
 #define CONN_STREAM        1

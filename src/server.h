@@ -11,11 +11,6 @@
 #include "packet.h"
 
 /**
- * Absolute maximum number of client connections to the server
- */
-#define MAX_CONNECTIONS 2048
-
-/**
  * Send a packet to all connected users
  */
 void broadcast(struct pt_packet *pkt);

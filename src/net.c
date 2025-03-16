@@ -29,11 +29,6 @@
 unsigned max_conn;
 
 /**
- * Absolute max number of connections
- */
-#define MAX_CONN 8192
-
-/**
  * Connections and associated pollfds
  */
 static struct netconn {
@@ -73,8 +68,8 @@ static unsigned char debruijn[32] = {
 	8, 12, 20, 28, 15, 17, 24, 7, 19, 27, 23, 6, 26, 5, 4, 31
 };
 
-static const unsigned long debmul = 0x07c4acddul;
-static const unsigned debshift    = 27;
+static const unsigned long debmul   = 0x07c4acddul;
+static const unsigned      debshift = 27;
 #endif
 #endif /* !__has_builtin(__builtin_clzl) */
 

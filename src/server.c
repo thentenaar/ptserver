@@ -6,10 +6,12 @@
  * See the LICENSE file for details.
  */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
 #include <errno.h>
+#include <getopt.h>
 #include <limits.h>
 #include <signal.h>
 #include <time.h>
@@ -24,6 +26,10 @@
 #include "packet.h"
 #include "hash.h"
 #include "server_handler.h"
+
+
+static unsigned timeout    = 300; /**< seconds */
+static const char *db_path = "ptserver.db";
 
 static volatile int force_exit;
 static void *db_w;
@@ -58,8 +64,9 @@ static void server_accept(void *ctx, struct sockaddr *addr,
 		goto err;
 
 	net_set_ctx(new_conn, c);
+	net_set_timeout(new_conn, timeout);
 	pt_context_init(c, new_fd);
-	c->db_r = db_open("ptserver.db", 'r');
+	c->db_r = db_open(db_path, 'r');
 	c->db_w = db_w;
 	c->fd   = new_fd;
 	memcpy(&c->addr, addr, addrlen);
@@ -162,32 +169,71 @@ void broadcast(struct pt_packet *pkt)
 
 int main(int argc, char *argv[])
 {
+	int c;
 	unsigned long i;
-	unsigned short port = 5001;
 	struct sockaddr_in addr;
-
-	(void)argc;
-	(void)argv;
-
-	force_exit = 0;
-
-	/* TODO: popt (port, max_conn, db_path) */
 
 	signal(SIGINT, sighandler);
 	signal(SIGPIPE, SIG_IGN);
 	srand(time(NULL));
 
+	force_exit = 0;
 	memset(&addr, 0, sizeof(struct sockaddr_in));
 	addr.sin_family      = AF_INET;
-	addr.sin_port        = htons(port);
+	addr.sin_port        = htons(5001);
 	addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+	while ((c = getopt(argc, argv, ":hd:p:m:s:t:")) != -1) {
+		switch (c) {
+		case 'h': /* [h]elp */
+			goto usage;
+		case 'd': /* [d]atabase file */
+			db_path = optarg;
+			break;
+		case 'p': /* [p]ort */
+			if ((i = strtoul(optarg, NULL, 10)) >= 65535) {
+				ERROR(("Invalid value for port: %ul", i));
+				goto err;
+			}
+
+			addr.sin_port = htons((unsigned short)i);
+			break;
+		case 'm': /* [m]axconn */
+			if ((i = strtoul(optarg, NULL, 10)) > MAX_CONN) {
+				ERROR(("Invalid value for maxconn: %lu (%u max)", i, MAX_CONN));
+				goto err;
+			}
+
+			max_conn = (unsigned)i;
+			break;
+		case 's': /* [s]erver ip */
+			if (!inet_aton(optarg, &addr.sin_addr)) {
+				ERROR(("Invalid value for server ip: %s", optarg));
+				goto err;
+			}
+			break;
+		case 't': /* connection [t]imeout */
+			if ((i = strtoul(optarg, NULL, 10)) < UINT_MAX)
+				timeout = (unsigned)i;
+			break;
+		case ':': /* Missing required argument */
+			ERROR(("Option -%c requires an argument", optopt));
+			goto usage;
+		case '?': /* Option argument not in opt string */
+			ERROR(("Unknown option -%c", optopt));
+			goto usage;
+		}
+	}
+
 	if (net_conn(NULL, &server_ops, (struct sockaddr *)&addr,
 	             sizeof addr, CONN_STREAM | CONN_LISTEN) == ULONG_MAX)
 		goto err;
 
-	INFO(("Listening on 0.0.0.0:%u", port))
-	db_w           = db_open("ptserver.db", 'w');
+	INFO(("Listening on %s:%u", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port)));
+	db_w           = db_open(db_path, 'w');
 	uid_to_context = ht_alloc(HT_VALUE_DEFAULT, HT_STATIC_KEYS);
+	if (!db_w || !uid_to_context)
+		goto err;
 
 	while (!force_exit) {
 		if (net_poll())
@@ -201,5 +247,12 @@ err:
 	db_close(db_w);
 	ht_free(uid_to_context);
 	return !force_exit;
+
+usage:
+	printf("Usage: %s [-h] [-d database_file] [-p port] [-m max_connections] "
+	       "[-s server_ip] [-t connection_timeout]\n\n", argv[0]);
+	printf("The defaults are: -d ptserver.db -p 5001 -m %u -s 0.0.0.0 -t 300\n", MAX_CONN);
+	puts("Note: the argument given for -m may be constrained by resource limits");
+	return 0;
 }
 
