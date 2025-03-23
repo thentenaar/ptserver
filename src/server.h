@@ -8,7 +8,7 @@
 #ifndef SERVER_H
 #define SERVER_H
 
-#include "packet.h"
+struct pt_packet;
 
 /**
  * Send a packet to all connected users

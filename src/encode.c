@@ -98,14 +98,16 @@ void ustoa(unsigned char *buf, unsigned short u, size_t len)
 /**
  * Generate the codebook used in the new algo in 8.2
  */
-void pt_encode_cook_codebook(struct pt_context *ctx)
+void pt_encode_cook_codebook(struct pt_context *ctx, int reset)
 {
 	unsigned i;
 
-	srand(my_seed());
-	ctx->cb1_offset = 1 + (rand() % (CODEBOOK1_LEN >> 2));
-	ctx->cb2_step   = 1 + (rand() & CODEBOOK2_STEP_MASK);
-	ctx->cb3_step   = 1 + (rand() & CODEBOOK3_STEP_MASK);
+	if (reset) {
+		srand(my_seed());
+		ctx->cb1_offset = 1 + (rand() % (CODEBOOK1_LEN >> 2));
+		ctx->cb2_step   = 1 + (rand() & CODEBOOK2_STEP_MASK);
+		ctx->cb3_step   = 1 + (rand() & CODEBOOK3_STEP_MASK);
+	}
 
 	/**
 	 * Mix the two source codebooks and extend it with an interleaved set

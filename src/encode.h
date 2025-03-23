@@ -8,13 +8,15 @@
 #ifndef ENCODE_H
 #define ENCODE_H
 
-#include "packet.h"
+#include <stddef.h>
 
 /**
  * Maximum length of a to-be-encoded/decoded string
  */
 #define ENCODE_MAX_LEN 128
 #define DECODE_MAX_LEN (128<< 2)
+
+struct pt_context;
 
 /**
  * Encode a string with the given variant of the algorithm, with the
@@ -37,7 +39,7 @@
  *
  * \param c Paltalk context
  * \param v Encoding algorithm variant (1 - 3)
- * \param s String to encode
+ * \param s String to decode
  * \return A newly-allocated string, or NULL on error.
  */
 #define pt_decode(c,v,s) pt_decode_with_challenge((c), (v), (c)->challenge, (s))
@@ -51,7 +53,7 @@ void ustoa(unsigned char *buf, unsigned short u, size_t len);
 /**
  * Generate the codebook used in the wrapper they added in 8.2
  */
-void pt_encode_cook_codebook(struct pt_context *ctx);
+void pt_encode_cook_codebook(struct pt_context *ctx, int reset);
 
 /**
  * Encode a string with the given variant of the algorithm, using

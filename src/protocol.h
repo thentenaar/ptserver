@@ -31,17 +31,18 @@
 /**
  * Room Constants
  */
-#define ALL_ROOMS         0xffffffff
-#define ALL_CATEGORIES    0xffffffff
+#define ALL_ROOMS               0xffffffff
 #define ROOM_TYPE_TEXT          0
 #define ROOM_TYPE_PRIVATE_VOICE 1
 #define ROOM_TYPE_VOICE         3
 #define ROOM_TYPE_PRIVATE_TEXT  5
 #define ROOM_TYPE_ANONYMOUS     7
+#define ROOM_TYPE_MAX           7
 
 /**
  * Virtual Categories (hardcoded in PT 7+)
  */
+#define ALL_CATEGORIES    0xffff
 #define CATEGORY_TOP      0x7530 /* PT 7 - 9.1: Top Rooms    */
 #define CATEGORY_FEATURED 0x7594 /* PT 7+: Featured Rooms     */
 #define CATEGORY_SCRADIO  0x7d0a /* PT 10.2: SHOUTcast Radio */
@@ -114,7 +115,7 @@
 #define PACKET_FILE_XFER_INIT           0xec77
 //#define 0xf02e /* PT 11.8: "GetUsersGeneralInfo" TODO: investigate */
 //#define 0xf038 /* PT 7+: Unknown TODO: investigate 11.8: "SendInsertEfax" */
-//#define 0xf43e /* PT 9.1+: Unknown TODO: investigate 11.8: "GetMyRoomInfo" */
+#define PACKET_GET_MY_ROOM_INFO         0xf43e /* PT 9.1+: "GetMyRoomInfo" 0-length */
 #define PACKET_SEARCH_ROOM              0xf510 /* PT7+ data: search text */
 //#define 0xf563 /* PT 9.0/9.1: Unknown [Unused?] TODO: investigate */
 //#define 0xf564 /* PT 9.0/9.1: Unknown [Unused?] TODO: investigate */
@@ -144,7 +145,7 @@
                                                /* PT8:    00 00 03 2c 00 00 00 00 - ? */
                                                /* PT8:    00 00 03 36 00 00 00 01 - Create a chat room */
                                                /* PT8:    00 00 03 37 00 00 00 01 - Paltalk e-store */
-                                               /* PT9.1+: 00 00 26 5e 00 00 00 01 - Create a chat room */
+                                               /* PT9.1+: 00 00 26 5e 00 00 00 01 - Create a chat room / Edit my room */
                                                /* PT9.1:  00 00 23 4d 00 00 00 01 - Upgrade to unlimited video */
                                                /* PT11.8: 00 00 26 5f 00 00 00 01 - Paltalk e-store */
 //#define 0xf632 /* PT 9.0+: TODO: investigate 11.8 calls this: "LaunchGame" */
@@ -202,10 +203,10 @@
 #define PACKET_START_PRIVATE_VIDEO      0xfd44 /* data: uid, port */
 //#define 0xfd58 /* PT 9.0+: Unknown TODO: investigate 11.8: "sendOnlineSearchRequest" */
 //#define 0xfd65 /* PT 10.2+: "SendEpsilonFunc" TODO: investigate */
-//#define 0xfd6a /* PT 9.0+: Unknown TODO: investigate 11.8: "TypeAhead" */
+//#define 0xfd6a /* PT 9.0+: "TypeAhead" data: 4 bytes, 2 bytes  TODO: investigate */
 #define PACKET_CHANGE_STATUS            0xfd94 /* PT8: 00 00 00 46, custom away msg */
-//#define 0xfd9e /* PT 9.0/9.1: Unknown [Unused?] TODO investigate */
-//#define 0xfda8 /* PT 9.0/9.1: Unknown [Unused?] TODO investigate */
+//#define 0xfd9e /* PT 9.0/9.1: Unknown 0-length [Unused?] TODO investigate */
+//#define 0xfda8 /* PT 9.0/9.1: Unknown data: string [Unused?] TODO investigate */
 //#define 0xfde4 /* PT 11.8: "TransmitVariableChangeToContra" TODO: investigate */
 //#define 0xfde7 /* PT 11.8: "OneOnOneCallTerminate" TODO investigate */
 //#define 0xfded /* PT 11.8: "OneOnOneCallInviteReply" TODO investigate */
@@ -215,9 +216,9 @@
 #define PACKET_BLOCK_BUDDY              0xfe0c
 //#define 0xfe27 /* PT 10.2: TODO: investigate (not in 11?) */
 //#define 0xfe3c /* PT 9.0+: Unknown [Unused?] TODO: investigate 11.8: "sendRefusal" */
-//#define 0xfe3e /* PT 9.0+: Unknown [Unused?] TODO: investigate 11.8: "sendRinger" */
+//#define 0xfe3e /* PT 5.1: "sendRinger" Request a call data: uid, 0000082a (default voice port, constant) */
 //#define 0xfe3f /* PT 9.0+: Unknown [Unused?] TODO: investigate 11.8: "sendPickup" */
-//#define 0xfe40 /* PT 9.0+: Unknown [Unused?] TODO: investigate 11.8: "sendHangup" */
+//#define 0xfe40 /* PT 5.1: "sendHangup" Hangup a call / cancel a request data: uid */
 //#define 0xfe4b /* PT 10.2: TODO: investigate (not in 11?) */
 //#define 0xfe4c /* PT 10.2: TODO: investigate (not in 11?) */
 //#define 0xfe4d /* PT 10.2: TODO: investigate (not in 11?) */
@@ -228,7 +229,7 @@
 #define PACKET_ROOM_HAND_DOWN           0xfe71 /* data: room id */
 #define PACKET_ROOM_HAND_UP             0xfe72 /* data: room id */
 #define PACKET_ROOM_UNREDDOT_USER       0xfe73
-#define PACKET_ROOM_IGNORE_USER         0xfe74 /* Ignore user in room? Data: room_id, target_uid, 00 00 - unignore, 00 01 - ignore */
+#define PACKET_ROOM_IGNORE_USER         0xfe74 /* Ignore user in room. Data: room_id, target_uid, 00 00 - unignore, 00 01 - ignore */
 //#define 0xfe76 /* PT 9.0+: Send SuperIM Request TODO: investigate 11.8: "SuperImInclude" */
 //#define 0xfe77 /* PT 9.0+: TODO: investigate 11.8: "GroupConvertToVoice" */
 //#define 0xfe78 /* PT 9.0+: Create SuperIM? Unknown TODO: investigate 11.8: "ImConvertToPrivateGroup" */
@@ -239,7 +240,7 @@
 #define PACKET_ROOM_REDDOT_USER         0xfe83
 #define PACKET_ROOM_BOUNCE_USER         0xfe84
 //#define 0xfe8a /* PT 11.8: "SoundConnectionLostOnClientSide" TODO: investigate */
-//#define 0xfe8e /* PT 9.0+: Unknown [Unused?] TODO: investigate 11.8: "AssignCoAdmin" */
+#define PACKET_ROOM_GRANT_ADMIN         0xfe8e /* PT 5+: "AssignCoAdmin" Grant room admin to a user. data: room id, user id (4 bytes) TODO: is this used? */
 #define PACKET_ROOM_INVITE_OUT          0xfe98 /* data: room_id, uid */
 //#define 0xfe99 /* PT 10.2+: "GroupWebEnableSuperIm" TODO: investigate */
 //#define 0xfe9a /* PT 10.2+: "GroupCreateEmptySuperIm" TODO: investigate */
@@ -250,26 +251,24 @@
 //#define 0xfeac /* PT 9.0+: Unknown [Unused?] TODO: investigate 11.8: "groupMembers" */
 #define PACKET_LIST_SUBCATEGORY         0xfeaf /* PT 8.2+: List rooms in a subcategory. data: category_id, subcategory_id */
 #define PACKET_NEW_LIST_CATEGORY        0xfeb0 /* PT 8.2+: simplification of the older LIST_CATEGORY. data: category_id */
-//#define 0xfeb1 /* PT 8+: Unknown 0-length TODO: investigate */
+#define PACKET_REQUEST_014F             0xfeb1 /* PT 8+ - 10.2: Request 0x014f 0-length TODO: investigate */
 #define PACKET_LIST_CATEGORY            0xfeb6
-#define PACKET_ROOM_LEAVE               0xfec0
-//#define 0xfec2 /* PT 8+: Unknown TODO: investigate 11.8: "GroupJoinMyRoom" */
-#define PACKET_ROOM_JOIN_AS_ADMIN2      0xfec3 /* PT 8+: TODO: investigate */
-#define PACKET_ROOM_JOIN_AS_ADMIN       0xfec4 /* data: rid, code (4 bytes), 0000082a (constant -- coincides with the incoming udp voice port) */
+#define PACKET_ROOM_PART                0xfec0
+#define PACKET_JOIN_MY_ROOM             0xfec2 /* PT 8+: "GroupJoinMyRoom" data: 0000082a (constant -- default voice port) */
+#define PACKET_ROOM_JOIN_AS_ADMIN2      0xfec3 /* PT 8+: Join as admin by room id instead of owner id */
+#define PACKET_ROOM_JOIN_AS_ADMIN       0xfec4 /* data: owner uid, code (4 bytes), 0000082a (constant -- coincides with the incoming udp voice port) */
 //#define 0xfec7 /* PT 11.8: Related to ROOM_JOIN_AS_ADMIN and ROOM_JOIN_AS_ADMIN2 TODO: investigate */
-//#define 0xfec8 /* PT 9.0+: Unknown TODO: investigate 11.8: "GroupJoin" (related to PACKET_ROOM_JOIN) */
-//#define 0xfec9 /* Related to joining a voice group? TODO: investigate data: k=v fields: aff,name,invis,port,lock (PT9 (not in 10): +email, +origin) */
+//#define 0xfec8 /* PT 9+: "GroupJoin" data: 10+ bytes 4/2/4/string TODO: investigate */
+#define PACKET_JOIN_FAVORITE_ROOM       0xfec9 /* data: k=v fields: aff=1\nname=str\ninvis=0|1\nport=2090\nlock=str (PT9 (not in 10): +email, +origin) */
 #define PACKET_ROOM_JOIN                0xfeca /* data: room_id, join_as_invisible (16 bits, 0|1), 0000082a (constant), options string? */
-#define PACKET_ROOM_REPORT_USER         0xfecf /* data: room_id, uid, complaint text */
+#define PACKET_ROOM_REPORT_USER         0xfecf /* "Send911" data: room_id, uid, complaint text */
 #define PACKET_ROOM_PRIVATE_INVITE      0xfed2 /* PT 7+: Replaces PT5 p2p functionality. data: 00 01 0000082a (constant) 00 01 uid */
-#define PACKET_ROOM_CREATE              0xfed4 /* PT 5: Create a room data: flags: 00 00 - no voice or private, 01 - private&voice, 03 - voice, 05 - private, category_id, 0000082a (constant), rating room_name \n password */
 //#define 0xfefb /* PT 11.8: "GetMultimediaResource" TODO: investigate */
 //#define 0xfefc /* PT 10.2: TODO: investigate (not in 11?) */
 #define PACKET_SEND_INVITE              0xff38 /* body is email=email@host.tld \n origin=255 */
 //#define 0xff4c /* PT 10.2: TODO: investigate (not in 11?) */
 #define PACKET_SET_BUDDY_DISPLAY_NAME   0xff59 /* Set a display name for a user data: uin (32 bits), displayname */
 #define PACKET_PING                     0xff5e /* PT 9.1+: Sent every 5 seconds after login. data: timestamp 32-bits. */
-//#define 0xff60 /* PT 5: ??? sent on a 1/minute timer (0x7e9) from create_room_dialog PT 9.0+: Unused? TODO: investigate 11.8: "sendPing" */
 //#define 0xff68 /* PT 9.1+: Unknown TODO: investigate 11.8: "ProfilePicChanged" */
 #define PACKET_NUDGE_OUT                0xff7b /* PT8/9.0 data: uin (32 bits), 00 00 00 00, nudge_type (32 bits) [1=car horn, 2=fog horn, 3=monkey] */
 //#define 0xff7c /* PT 8+: Unknown (advertising related?) TODO: investigate */
@@ -278,7 +277,7 @@
 //#define 0xff9c /* PT 9+: Unknown [Unused?] TODO: investigate 11.8: "IntroduceUid" */
 #define PACKET_GET_LANGUAGES            0xffa2 /* PT 11.7: "GetLanguages" 0-length */
 //#define 0xffa3 /* PT 11.8: "GetGroupRecentlyVisited" TODO: investigate */
-//#define 0xffac /* PT 9+: "GroupFavoritesRemove" TODO: investigate */
+//#define 0xffac /* PT 11.8: "GroupFavoritesRemove" TODO: investigate */
 //#define 0xffad /* PT 11.8: "GroupFavoritesAdd" TODO: investigate */
 //#define 0xffaf /* PT 10.2: TODO: investigate (not in 11.8?) */
 //#define 0xffb0 /* PT 10.2: TODO: investigate (not in 11.8?) */
@@ -300,7 +299,7 @@
  * Paltak packet types: server -> client
  */
 #define PACKET_IM_IN                    0x0014
-#define PACKET_PERSONALS_MSG_IN         0x001a /* data: sender_uid recipient_uid dw1 dw2 message; Shows some an IM dialog in PT 5.1; "Coming Soon" in PT 7/8 */
+#define PACKET_PERSONALS_MSG_IN         0x001a /* data: sender_uid recipient_uid dw1 dw2 message; Shows an IM dialog in PT 5.1; "Coming Soon" in PT 7/8 */
 #define PACKET_ANNOUNCEMENT             0x0027
 #define PACKET_NOTICE                   0x0029 /* PT 9.1+: More flexible announcement with up to three buttons w/ url actions and a message */
                                                /* buttons=int;button1=text;button2=text;button3=text;url1=text;url2=text;url3=text;msg=text */
@@ -328,7 +327,7 @@
 #define PACKET_ROOM_USER_LEFT           0x0140
 #define PACKET_CATEGORY_COUNTS          0x014b /* Number of rooms per category */
 #define PACKET_ROOM_LIST                0x014c /* List of rooms for a requested category */
-//#define 0x014f /* PT 9+: 0xc8 list of c=long\nnm=string TODO: investigate */
+//#define 0x014f /* PT 8.2+ - 10.2: 0xc8 list of c=long\nnm=string TODO: investigate */
 #define PACKET_NEW_ROOM_LIST            0x0150 /* PT 8.2+: New room list for a category    */
 #define PACKET_SUBCATEGORY_ROOM_LIST    0x0151 /* PT 8.2 - 9.x: List of rooms for a subcategory */
 #define PACKET_ROOM_USERLIST            0x0154
@@ -345,7 +344,7 @@
 //#define 0x0187 /* PT 10.2+: Unknown: TODO investigate "GroupConvertToNoVoiceOut" */
 //#define 0x0188 /* PT 9+: "ConvertToPrivateGroup" Unknown: TODO: investigate */
 //#define 0x0189 /* PT 9+: "ConvertTextToVoiceGroup" Unknown: TODO: investigate */
-#define PACKET_ROOM_IGNORE              0x018c /* PT 7+ "IgnoreOut"  TODO: Investigate */
+#define PACKET_ROOM_IGNORE              0x018c /* PT 7+ "IgnoreOut" data: room_id, uid, 0000 / 0001 (on/off) */
 #define PACKET_ROOM_USER_REDDOT_OFF     0x018d
 #define PACKET_ROOM_USER_HAND_UP        0x018e
 #define PACKET_ROOM_USER_HAND_DOWN      0x018f
@@ -365,7 +364,7 @@
 #define PACKET_USER_STATUS              0x026c
 //#define 0x028a /* PT 10.2+: "PaltalkSpecialUid" TODO: investigate */
 #define PACKET_FORCED_IM                0x0294 /* Kindof like a system message         */
-//#define 0x0296 /* PT 9+: "TypeAheadOut" TODO: investigate */
+#define PACKET_TYPEAHEAD_IN             0x0296 /* PT 9+: "TypeAheadOut" data: 4 bytes (uid?), 0001 - off, 0001 - on TODO: investigate */
 //#define 0x029b /* PT 10.2+: TODO: investigate */
 #define PACKET_BANNER_INTERVAL          0x02b2 /* Set the banner refresh interval. data: interval (16 bits, multiplied by ~1.5 seconds), 'C' (IM windows) / 'G' (Room windows) */
 #define PACKET_ROOM_BANNER_URL          0x0320 /* data: room id, banner URL */
@@ -438,7 +437,7 @@
 #define PACKET_BUDDY_GROUPS_LIST        0x0a8c /* [PT 7 - 9.1] TODO: investigate */
 #define PACKET_BUDDY_GROUP_MEMBERS      0x0a98 /* [PT 7 - 9.1] TODO: investigate */
 #define PACKET_ROOM_SEARCH_RESULTS      0x0af0 /* PT 7+: Room Search Results */
-#define PACKET_MY_ROOM_INFO             0x0bc2 /* PT 8+: "MyRoomInfoOut" TODO: investigate */
+#define PACKET_MY_ROOM_INFO             0x0bc2 /* PT 8+: "MyRoomInfoOut" 0xc8-delimited list: name=str,rating=G,catg,[9.1:subcatg],intro=str,max=long,lock=Y/N */
 #define PACKET_FILE_XFER_REQUEST        0x1389
 #define PACKET_FILE_XFER_REJECTED       0x138b
 #define PACKET_FILE_XFER_ACCEPTED       0x138c
@@ -534,24 +533,26 @@
 #define PACKET_DCC_XFER_ACCEPT          0xfe44
 #define PACKET_DCC_XFER_REJECT          0xfe45
 #define PACKET_PT5_DECLINE_VOICE_CALL   0xfec3 /* data: uid_other_end */
+#define PACKET_ROOM_CREATE              0xfed4 /* PT 5: Create a room data: flags: 00 00 - no voice or private, 01 - private&voice, 03 - voice, 05 - private, category_id, 0000082a (constant), rating room_name \n password */
+#define PACKET_PT5_PING                 0xff60 /* PT 5: "sendPing" sent on a 1/minute timer (0x7e9) from room_dialog. 0-length */
 #define PACKET_OLD_CLIENT_HELLO         0xff9c /* Client hello packet */
 
 /* server -> client */
 #define PACKET_PT5_INVITE_STATUS        0x00c8 /* Status of sent invites. 0xc8 delimited list of email= status= */
 #define PACKET_PT5_TELL_YOUR_FRIENDS    0x00c9 /* Show the "Tell your friends..." dialog (0-length) */
-//#define 0x014a /* PT 5.1: [Alternate Room list?] Unknown TODO: investigate */
+//#define 0x014a /* PT 5.1: [Alternate Room list?] // older version of 0x014c? Unknown TODO: investigate */
 //#define 0x014d /* PT 5.1: Unknown TODO: investigate */
 //#define 0x014e /* PT 5.1: Unknown [Room list related] TODO: investigate */
-#define PACKET_PT5_GRANT_ROOM_ADMIN     0x0172 /* data: room_id */
-//#define 0x0174 /* PT 5.1: Unknown: TODO investigate */
+#define PACKET_PT5_ROOM_ADMIN_GRANTED   0x0172 /* Reply to 0xfe8e data: room_id */
+#define PACKET_PT5_ROOM_ADMIN_STATUS    0x0174 /* Similar effect to 0x0172 {room_id, my_uid, on} data: room_id, uid, 0000 - off 0001 - on */
 //#define 0x01a4 /* PT 5: Unknown: TODO: investigate */
 #define PACKET_DCC_XFER_REJECTED        0x01bb
 #define PACKET_DCC_XFER_ACCEPTED        0x01bc
 #define PACKET_DCC_XFER_REQUEST         0x01bd
-//#define 0x01c0 /* PT5.0: TODO: investigate */
+#define PACKET_PT5_VOICE_CALL_REJECT    0x01c0
 #define PACKET_PT5_VOICE_CONN_INFO      0x01c1
 #define PACKET_PT5_VOICE_CALL_INVITE    0x01c2
-#define PACKET_PT5_VOICE_CALL_HANGUP    0x01c3 /* TODO: investigate */
+#define PACKET_PT5_VOICE_CALL_HANGUP    0x01c3 /* handled same as 0x01c0 */
 #define PACKET_PT5_VIDEO_CALL_INVITE    0x02bc /* data: same as 0x01c2 */
 #define PACKET_PT5_VIDEO_CALL_DECLINED  0x02bd /* TODO: investigate */
 #define PACKET_PT5_VIDEO_CONN_INFO      0x02c6 /* TODO: dword, dword, word investigate */
@@ -559,7 +560,7 @@
 #define PACKET_PT5_SEND_C_DRIVE_SERIAL  0x04c9 /* data: 00 00 challenge_for_fb37 */
 #define PACKET_PT5_EMAIL_CONFIRM        0x0898 /* Display email confirmation code dialog */
 //#define 0x17f2 /* PT5: data: 4 bytes, ignored */
-//#define 0xe7fa /* PT5: Unknown 0-length TODO: investigate */
+#define PACKET_PT5_E7FA                 0xe7fa /* PT5: Unknown 0-length TODO: investigate */
 #define PACKET_PT5_SEND_LOGIN           0xffb1 /* PT 5: Causes PACKET_LOGIN to be sent (same payload as PACKET_CHALLENGE) */
 
 void each_field(char *s, void *ud, void (*cb)(void *ud, unsigned i, const char *line));

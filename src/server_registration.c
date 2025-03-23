@@ -14,7 +14,6 @@
 #define REGISTRATION_FAILED_LEN 20
 static const char * const registration_failed = "Registration failed!";
 
-
 /**
  * Ordered field names for PT 7/8
  */
@@ -59,7 +58,7 @@ void registration_transition(struct pt_context *ctx)
 		buf[1] = ctx->challenge & 0xff;
 
 		if (ctx->pkt_in.version >= PROTOCOL_VERSION_82) {
-			pt_encode_cook_codebook(ctx);
+			pt_encode_cook_codebook(ctx, 1);
 			buf[2] = (ctx->cb1_offset >> 8) & 0xff;
 			buf[3] = ctx->cb1_offset & 0xff;
 			buf[4] = (ctx->cb2_step >> 8) & 0xff;

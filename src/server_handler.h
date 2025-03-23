@@ -7,8 +7,9 @@
  */
 #ifndef SERVER_HANDLER_H
 
-#include "packet.h"
-#include "server.h"
+#include <stddef.h>
+
+struct pt_context;
 
 /**
  * Send a return code packet back to the client.

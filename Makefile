@@ -5,7 +5,7 @@
 # This code is licensed under the Simplified BSD License.
 # See the LICENSE file for details.
 LIBS=-lsqlite3 -lm
-CPPFLAGS=-DNDEBUG
+CPPFLAGS=-O2 -D_XOPEN_SOURCE=500 -DNDEBUG -Wall -Wextra -Wno-implicit-fallthrough -Wno-overlength-strings
 
 # Gather the sources
 SRCS := $(wildcard src/*.c)

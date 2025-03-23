@@ -77,9 +77,10 @@ struct pt_context {
 	struct msghdr hdr_in;
 	struct msghdr data_in;
 	struct msghdr pkt_out;
-	struct pt_packet pkt_in;
-	struct pt_packet **pkts_out; /**< So that we can track them */
-	size_t npkts_out;
+	struct pt_packet pkt_in;     /**< Current inbound packet */
+	struct pt_packet **pkts_out; /**< Outbound packet queue */
+	unsigned long *remaining;    /**< Bytes remaining for each outbound */
+	size_t npkts_out;            /**< Size of pkts_out */
 
 	/* Packet callback */
 	void (*on_packet)(struct pt_context *);
@@ -95,7 +96,5 @@ struct pt_packet *new_packet(unsigned short type, unsigned short len, const char
 void send_packet(struct pt_context *ctx, struct pt_packet *pkt);
 void free_packet(struct pt_packet *pkt);
 void dump_packet(int, struct pt_packet *pkt);
-
-// XXX: my original uid: 02 aa 17 e6
 
 #endif /* PACKETS_H */

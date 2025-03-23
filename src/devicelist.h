@@ -8,7 +8,7 @@
 #ifndef DEVICELIST_H
 #define DEVICELIST_H
 
-#include "packet.h"
+struct pt_context;
 
 /**
  * Non-zero if the current device is in the user's device list

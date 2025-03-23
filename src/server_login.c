@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include <arpa/inet.h>
 
 #include "logging.h"
@@ -39,6 +40,7 @@ void login_flow(struct pt_context *ctx)
 	size_t len;
 
 	if (ctx->pkt_in.length >= 4) {
+		assert(ctx->pkt_in.data);
 		uid = ((ctx->pkt_in.data[0] & 0xff) << 24) |
 		      ((ctx->pkt_in.data[1] & 0xff) << 16) |
 		      ((ctx->pkt_in.data[2] & 0xff) << 8)  |
@@ -120,16 +122,18 @@ void login_flow(struct pt_context *ctx)
 		 *   0  -  3: uid (32 bits)
 		 *   4  -  7: 00 00 00 01 (constant)
 		 *   8  -  9: 00 00 [PT 7 - 9.2: 00 02, 10.2+: 04 09 00 02] (5.1: value of notANewUser reg. entry)
+		 * PT 5.1+:
 		 *   10 - 13: 00 00 00 1e (Initial Status: Online/Away/DND/Invisible)
 		 *   14 -  *: encoded fs serial (v1, challenge of uid % 0x37)
 		 *
 		 * This may also send a return_code.
 		 */
-		ctx->uid = uid;
+		ctx->uid              = uid;
+		ctx->status           = STATUS_ONLINE;
 		ctx->protocol_version = ctx->pkt_in.version;
 		i = ctx->protocol_version >= PROTOCOL_VERSION_10 ? -2 : 0;
 
-		if (ctx->pkt_in.type == PACKET_INITIAL_STATUS) {
+		if (ctx->pkt_in.type == PACKET_INITIAL_STATUS && ctx->protocol_version > PROTOCOL_VERSION_50) {
 			ctx->status = ((ctx->pkt_in.data[10 - i] & 0xff) << 24) |
 			              ((ctx->pkt_in.data[11 - i] & 0xff) << 16) |
 			              ((ctx->pkt_in.data[12 - i] & 0xff) << 8)  |
@@ -174,7 +178,7 @@ void login_flow(struct pt_context *ctx)
 			/**
 			 * PT 8.2 adds the new codebook stuff
 			 */
-			pt_encode_cook_codebook(ctx);
+			pt_encode_cook_codebook(ctx, 1);
 			buf = calloc(21 + (s ? strlen(s) + 1 : 0), 1);
 
 			buf[0] = (ctx->cb1_offset >> 8) & 0xff;

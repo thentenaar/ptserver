@@ -8,7 +8,7 @@
 #ifndef BUDDYLIST_H
 #define BUDDYLIST_H
 
-#include "packet.h"
+struct pt_context;
 
 /**
  * Send the buddy or block list

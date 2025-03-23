@@ -32,6 +32,17 @@ static void *insert_user;
 static void *logged_in;
 static void *set_privacy;
 
+/**
+ * Basic nickname colors depending on service tier
+ */
+const char * const colors[5] = {
+	"000000000", /* N */
+	"000000255", /* Y */
+	"000000255", /* 6 */
+	"000255000", /* E */
+	"255000000", /* Admin */
+};
+
 static int user_from_row(void *userdata, int cols, char *val[], char *col[])
 {
 	int i;
@@ -155,8 +166,8 @@ void user_from_named_field(void *ud, const char *k, const char *v)
 	switch(strlen(k)) {
 	case 3:
 		switch (*k) {
-		case 'u': if (!strcmp(k, "uid")) { u->uid = atol(v); ++known; } break;
-		case 's': if (!strcmp(k, "sup")) { u->sup = atoi(v); ++known; } break;
+		case 'u': if (!strcmp(k, "uid")) { u->uid = strtoul(v, NULL, 10); ++known; } break;
+		case 's': if (!strcmp(k, "sup")) { u->sup = strtoul(v, NULL, 10); ++known; } break;
 		}
 	break;
 	case 4:
@@ -168,6 +179,7 @@ void user_from_named_field(void *ud, const char *k, const char *v)
 	case 5:
 		switch (*k) {
 		case 'a': if (!strcmp(k, "admin")) { u->admin = atoi(v);   ++known; } break;
+		case 'c': if (!strcmp(k, "color")) { u->color = strdup(v); ++known; } break;
 		case 'e': if (!strcmp(k, "email")) { u->email = strdup(v); ++known; } break;
 		case 'f': if (!strcmp(k, "first")) { u->first = strdup(v); ++known; } break;
 		case 'p': if (!strcmp(k, "paid1")) { u->paid1 = strdup(v); ++known; } break;
@@ -192,6 +204,10 @@ void user_from_named_field(void *ud, const char *k, const char *v)
 		case 'v': if (!strcmp(k, "verified")) { u->verified = tolower(*v) == 'y'; ++known; } break;
 		}
 	break;
+	case 11:
+		if (!strcmp(k, "crown_level"))
+			u->crown_level = strtoul(v, NULL, 10) & 0xff;
+	break;
 	default:
 		if (!strcmp(k, "get_offers_from_affiliates")) {
 			u->get_offers_from_affiliates = tolower(*v) == 'y';
@@ -202,8 +218,9 @@ void user_from_named_field(void *ud, const char *k, const char *v)
 		}
 	}
 
+
 #ifndef NDEBUG
-	if (!known && strcmp(k, "created") && strcmp(k, "last_login"))
+	if (!known && strcmp(k, "created") && strcmp(k, "last_login") && strcmp(k, "crown_level"))
 		WARN(("Ignoring unknown user field `%s=%s'", k, v));
 #endif
 }
@@ -272,10 +289,8 @@ int user_set_password(void *db_w, unsigned long uid, const char *pw)
 			"INSERT INTO secrets(uid, password) VALUES(?,?) ON CONFLICT "
 			"DO UPDATE SET password=excluded.password");
 
-		if (!set_pw) {
-			ERROR(("user_set_password: Failed to prepare query"))
+		if (!set_pw)
 			goto ret;
-		}
 	}
 
 	db_reset_prepared(set_pw);
@@ -299,10 +314,8 @@ int user_set_password_hint(void *db_w, unsigned long uid, const char *hint)
 	if (!set_pw_hint) {
 		set_pw_hint = db_prepare(db_w, "UPDATE secrets SET password_hint=? WHERE uid=?");
 
-		if (!set_pw_hint) {
-			ERROR(("user_set_password_hint: Failed to prepare query"))
+		if (!set_pw_hint)
 			goto ret;
-		}
 	}
 
 	db_reset_prepared(set_pw_hint);
@@ -325,10 +338,8 @@ int user_set_secret_question(void *db_w, unsigned long uid, unsigned id, const c
 
 	if (!set_secret_q) {
 		set_secret_q = db_prepare(db_w,	"UPDATE secrets SET sq_index=?, sq_answer=? WHERE uid=?");
-		if (!set_secret_q) {
-			ERROR(("user_set_secret_question: Failed to prepare query"))
+		if (!set_secret_q)
 			goto ret;
-		}
 	}
 
 	db_reset_prepared(set_secret_q);
@@ -366,6 +377,7 @@ ret:
 
 int register_user(void *db_w, struct user *u)
 {
+	char paid1;
 	int ret = -1;
 
 	if (!db_w)
@@ -375,22 +387,22 @@ int register_user(void *db_w, struct user *u)
 		insert_user = db_prepare(db_w,
 			"INSERT INTO users(nickname, email, first, last, privacy, "
 			"verified, random, paid1, get_offers_from_us, "
-			"get_offers_from_affiliates, banners, admin, sup, created) "
+			"get_offers_from_affiliates, banners, admin, sup, color, created) "
 			"VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now','subsec')) "
 			"RETURNING uid");
 
-		if (!insert_user) {
-			ERROR(("register_user: Failed to prepare query: %s", db_errmsg(db_w)))
+		if (!insert_user)
 			goto ret;
-		}
 	}
 
+	paid1 = u->paid1 ? (*u->paid1 == 'N' ? 0 : *u->paid1) : 0;
 	db_reset_prepared(insert_user);
-	db_bind(insert_user, "tttttiitiiiii", u->nickname, u->email, u->first,
+	db_bind(insert_user, "tttttiitiiiiit", u->nickname, u->email, u->first,
 	        u->last, u->privacy ? u->privacy : "G", !!u->verified,
-	        !!u->random, u->paid1 ? u->paid1 : "Y",
+	        !!u->random, u->paid1 ? u->paid1 : "N",
 	        !!u->get_offers_from_us, !!u->get_offers_from_affiliates,
-	        !!u->banners, !!u->admin, !!u->sup);
+	        !!u->banners, !!u->admin, !!u->sup,
+	        u->admin ? colors[4] : colors[(!!(paid1 & 4) << 1 | !!(paid1 & 5))]);
 
 	if ((u->uid = db_get_int(insert_user)))
 		++ret;
@@ -458,12 +470,8 @@ void user_logged_in(void *db_w, unsigned long uid)
 		return;
 
 	if (!logged_in) {
-		logged_in = db_prepare(db_w, "UPDATE users SET last_login=datetime('now','subsec') WHERE uid=?");
-
-		if (!logged_in) {
-			ERROR(("user_logged_in: Failed to prepare query"))
+		if (!(logged_in = db_prepare(db_w, "UPDATE users SET last_login=datetime('now','subsec') WHERE uid=?")))
 			return;
-		}
 	}
 
 	db_reset_prepared(logged_in);
@@ -479,12 +487,8 @@ void user_set_privacy(void *db_w, unsigned long uid, char privacy)
 		return;
 
 	if (!set_privacy) {
-		set_privacy = db_prepare(db_w, "UPDATE users SET privacy=? WHERE uid=?");
-
-		if (!set_privacy) {
-			ERROR(("user_set_privacy: Failed to prepare query"))
+		if (!(set_privacy = db_prepare(db_w, "UPDATE users SET privacy=? WHERE uid=?")))
 			return;
-		}
 	}
 
 	buf[0] = privacy;
@@ -515,7 +519,6 @@ char *search_users(void *db_r, const char *field, const char *partial)
 
 	sprintf(buf, "SELECT uid,nickname,first,last,email FROM users WHERE %s LIKE ?", field);
 	if (!(p = db_prepare(db_r, buf))) {
-		ERROR(("search_users: Failed to prepare query"));
 		free(buf);
 		return NULL;
 	}
@@ -541,5 +544,6 @@ void free_user(struct user *user)
 	if (user->last)     free(user->last);
 	if (user->paid1)    free(user->paid1);
 	if (user->privacy)  free(user->privacy);
+	if (user->color)    free(user->color);
 	memset(user, 0, sizeof *user);
 }

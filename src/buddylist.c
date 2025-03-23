@@ -15,7 +15,6 @@
 #include "database.h"
 #include "protocol.h"
 #include "packet.h"
-#include "logging.h"
 #include "buddylist.h"
 
 /* Prepared queries on db_w */
@@ -99,7 +98,7 @@ static char *jsonesc(const char *s)
 	return buf;
 }
 
-static struct pt_packet *mk_statuschange_json(struct pt_context *ctx, unsigned long uid, unsigned long status, const char *msg)
+static struct pt_packet *mk_statuschange_json(unsigned long uid, unsigned long status, unsigned crown, const char *msg)
 {
 	int len;
 	char *buf, *mbuf = NULL;
@@ -113,44 +112,46 @@ static struct pt_packet *mk_statuschange_json(struct pt_context *ctx, unsigned l
 	}
 
 	len = sprintf(buf,
-	             "{\"user_id\":%lu,\"state\":%lu,\",away_mesg\":\"%s\",\"crown_level\":1}",
-	             uid, status, mbuf ? mbuf : "");
+	             "{\"user_id\":%lu,\"state\":%lu,\",away_mesg\":\"%s\",\"crown_level\":%u}",
+	             uid, status, mbuf ? mbuf : "", crown);
 	if (mbuf) free(mbuf);
 	return new_packet(PACKET_BUDDY_STATUSCHANGE, len, buf, 0);
 }
 
 /**
- * Construct a STATUSCHANGE packet based on the recipient's protocol
+ * Construct a BUDDY_STATUSCHANGE packet based on the recipient's protocol
  * version
  */
-static struct pt_packet *mk_statuschange(struct pt_context *ctx, unsigned long uid, unsigned long status, const char *msg)
+static struct pt_packet *mk_statuschange(struct pt_context *ctx, unsigned long uid, unsigned long status, unsigned crown, const char *msg)
 {
 	char buf[14 + STATUSMSG_MAX];
 	size_t msglen, len = 8;
 
-	/* 11.7+ uses JSON for this... :/ */
-	if (ctx->pkt_in.version >= PROTOCOL_VERSION_117)
-		return mk_statuschange_json(ctx, uid, status, msg);
+	if (ctx->uid != uid) {
+		if (status == STATUS_INVISIBLE)
+			status = STATUS_OFFLINE;
+
+		/* 11.7+ uses JSON for this... :/ */
+		if (ctx->pkt_in.version >= PROTOCOL_VERSION_117)
+			return mk_statuschange_json(uid, status, crown, msg);
+
+		/* TODO: PT 9.1 needs this extra bit... Not sure what these signify */
+		if (ctx->pkt_in.version >= PROTOCOL_VERSION_91) {
+			buf[8]  = 0x00;
+			buf[9]  = 0x5d;
+			len    += 2;
+		}
+	} else if (status == STATUS_OFFLINE)
+		return NULL;
 
 	buf[0] = (uid >> 24) & 0xff;
 	buf[1] = (uid >> 16) & 0xff;
 	buf[2] = (uid >> 8)  & 0xff;
 	buf[3] = uid & 0xff;
-	buf[4] = (char)((status >> 24) & 0xff);
-	buf[5] = (char)((status >> 16) & 0xff);
-	buf[6] = (char)((status >> 8) & 0xff);
-	buf[7] = (char)(status & 0xff);
-
-	/* TODO: PT 9.1 needs this extra bit... Not sure what these signify */
-	if (ctx->pkt_in.version >= PROTOCOL_VERSION_91) {
-		buf[8]  = 0x00;
-		buf[9]  = 0x5d;
-		buf[10] = 0x00;
-		buf[11] = 0x00;
-		buf[12] = 0x00;
-		buf[13] = 0x00;
-		len += 6;
-	}
+	buf[4] = (status >> 24) & 0xff;
+	buf[5] = (status >> 16) & 0xff;
+	buf[6] = (status >> 8) & 0xff;
+	buf[7] = status & 0xff;
 
 	if (status != STATUS_ONLINE && ctx->pkt_in.version >= PROTOCOL_VERSION_82 && msg) {
 		msglen = min(STATUSMSG_MAX, strlen(msg));
@@ -158,6 +159,8 @@ static struct pt_packet *mk_statuschange(struct pt_context *ctx, unsigned long u
 		len += msglen;
 	}
 
+	if (ctx->uid == uid)
+		return new_packet(PACKET_USER_STATUS, len - 4, buf + 4, PACKET_F_COPY);
 	return new_packet(PACKET_BUDDY_STATUSCHANGE, len, buf, PACKET_F_COPY);
 }
 
@@ -172,13 +175,13 @@ static int do_broadcast_status(void *userdata, int cols, char *val[], char *col[
 	(void)cols;
 	(void)col;
 
-	uid = atol(val[0]);
+	uid = strtoul(val[0], NULL, 10);
 	sprintf(buf, "%ld", uid);
 	if (!(buddy = ht_get_ptr_nc(uid_to_context, buf)) ||
 	    user_blocked_me(ctx, uid))
 		return 0;
 
-	send_packet(buddy, mk_statuschange(buddy, ctx->uid, ctx->status, ctx->status_msg));
+	send_packet(buddy, mk_statuschange(buddy, ctx->uid, ctx->status, ctx->user.crown_level, ctx->status_msg));
 	return 0;
 }
 
@@ -187,20 +190,21 @@ static int do_broadcast_status(void *userdata, int cols, char *val[], char *col[
  */
 static int send_buddy_status(void *userdata, int cols, char *val[], char *col[])
 {
-	char uid_str[12];
-	unsigned long uid, status;
+	unsigned long uid;
 	struct pt_packet *pkt = NULL;
 	struct pt_context *ctx = userdata, *buddy;
 	(void)cols;
 	(void)col;
 
-	uid = atol(val[0]);
-	sprintf(uid_str, "%ld", uid);
-	if ((buddy = ht_get_ptr_nc(uid_to_context, uid_str)))
-		pkt = mk_statuschange(ctx, uid, buddy->status, buddy->status_msg);
+	if ((buddy = ht_get_ptr_nc(uid_to_context, val[0])))
+		pkt = mk_statuschange(ctx, buddy->uid, buddy->status, buddy->user.crown_level, buddy->status_msg);
 	else {
-		status = i_blocked_user(ctx, uid) ? STATUS_BLOCKED : STATUS_OFFLINE;
-		pkt = mk_statuschange(ctx, uid, status, NULL);
+		uid = strtoul(val[0], NULL, 10);
+		pkt = mk_statuschange(
+			ctx, uid,
+			i_blocked_user(ctx, uid) ? STATUS_BLOCKED : STATUS_OFFLINE,
+			0, NULL
+		);
 	}
 
 	send_packet(ctx, pkt);
@@ -245,7 +249,7 @@ void broadcast_status(struct pt_context *ctx)
 	char buf[64];
 	sprintf(buf, "SELECT buddy FROM buddylist WHERE uid=%ld", ctx->uid);
 	db_exec(ctx->db_r, ctx, buf, do_broadcast_status);
-	send_packet(ctx, mk_statuschange(ctx, ctx->uid, ctx->status, ctx->status_msg));
+	send_packet(ctx, mk_statuschange(ctx, ctx->uid, ctx->status, ctx->user.crown_level, ctx->status_msg));
 }
 
 /**
@@ -269,10 +273,8 @@ void set_buddy_display(struct pt_context *ctx, unsigned long uid, const char *di
 			"UPDATE buddylist SET display=? WHERE uid=? AND buddy=?"
 		);
 
-		if (!set_disp_name) {
-			ERROR(("set_buddy_display: Failed to prepare query"));
+		if (!set_disp_name)
 			return;
-		}
 	}
 
 	db_reset_prepared(set_disp_name);
@@ -292,10 +294,8 @@ void add_buddy(struct pt_context *ctx, unsigned long uid)
 			"ON CONFLICT DO NOTHING"
 		);
 
-		if (!q_add_buddy) {
-			ERROR(("add_buddy: Failed to prepare query"));
+		if (!q_add_buddy)
 			return;
-		}
 	}
 
 	db_reset_prepared(q_add_buddy);
@@ -314,10 +314,8 @@ void remove_buddy(struct pt_context *ctx, unsigned long uid)
 			"DELETE FROM buddylist WHERE uid=? AND buddy=?"
 		);
 
-		if (!q_remove_buddy) {
-			ERROR(("remove_buddy: Failed to prepare query"));
+		if (!q_remove_buddy)
 			return;
-		}
 	}
 
 	db_reset_prepared(q_remove_buddy);
@@ -337,10 +335,8 @@ void block_buddy(struct pt_context *ctx, unsigned long uid)
 			"ON CONFLICT DO NOTHING"
 		);
 
-		if (!q_block_buddy) {
-			ERROR(("block_buddy: Failed to prepare query"));
+		if (!q_block_buddy)
 			return;
-		}
 	}
 
 	db_reset_prepared(q_block_buddy);
@@ -359,10 +355,8 @@ void unblock_buddy(struct pt_context *ctx, unsigned long uid)
 			"DELETE FROM blocklist WHERE uid=? AND buddy=?"
 		);
 
-		if (!q_unblock_buddy) {
-			ERROR(("unblock_buddy: Failed to prepare query"));
+		if (!q_unblock_buddy)
 			return;
-		}
 	}
 
 	db_reset_prepared(q_unblock_buddy);
@@ -375,18 +369,14 @@ void unblock_buddy(struct pt_context *ctx, unsigned long uid)
  */
 int user_blocked_me(struct pt_context *ctx, unsigned long uid)
 {
-	int ret = 0;
-
 	if (!blocked_user) {
 		blocked_user = db_prepare(
 			ctx->db_w,
 			"SELECT COUNT(*) FROM blocklist WHERE uid=? AND buddy=?"
 		);
 
-		if (!blocked_user) {
-			ERROR(("user_blocked_me: Failed to prepare query"));
+		if (!blocked_user)
 			return 0;
-		}
 	}
 
 	db_reset_prepared(blocked_user);
@@ -405,10 +395,8 @@ int i_blocked_user(struct pt_context *ctx, unsigned long uid)
 			"SELECT COUNT(*) FROM blocklist WHERE uid=? AND buddy=?"
 		);
 
-		if (!blocked_user) {
-			ERROR(("i_blocked_user: Failed to prepare query"));
+		if (!blocked_user)
 			return 0;
-		}
 	}
 
 	db_reset_prepared(blocked_user);
@@ -427,10 +415,8 @@ int is_buddy(struct pt_context *ctx, unsigned long uid)
 			"SELECT COUNT(*) FROM buddylist WHERE uid=? AND buddy=?"
 		);
 
-		if (!user_is_buddy) {
-			ERROR(("is_buddy: Failed to prepare query"));
+		if (!user_is_buddy)
 			return 0;
-		}
 	}
 
 	db_reset_prepared(user_is_buddy);

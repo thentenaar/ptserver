@@ -52,13 +52,13 @@ void pt_context_destroy(struct pt_context *ctx)
 
 	free(ctx->hdr_in.msg_iov);
 	free(ctx->data_in.msg_iov);
+	free(ctx->pkt_out.msg_iov);
 
 	/* Deref any unsent packets */
-	for (i = 0; i < ctx->npkts_out; i++) {
-		if (!--ctx->pkts_out[i]->refcnt)
-			free(ctx->pkts_out[i]);
-	}
+	for (i = 0; i < ctx->npkts_out; i++)
+		free_packet(ctx->pkts_out[i]);
 
+	free(ctx->remaining);
 	free(ctx->pkts_out);
 	free(ctx->status_msg);
 	free_user(&ctx->user);
@@ -85,13 +85,13 @@ void packet_in(struct pt_context *ctx)
 			return;
 	} else {
 		br = recvmsg(ctx->fd, &ctx->hdr_in, MSG_PEEK);
-		if (br >= 0 && br < 6)
-			return;
-
-		if (br < 0) {
+		if (br <= 0) {
 			ctx->disconnect++;
 			return;
 		}
+
+		if (br < 6)
+			return;
 
 		if (recvmsg(ctx->fd, &ctx->hdr_in, 0) != br) {
 			ctx->disconnect++;
@@ -113,7 +113,7 @@ void packet_in(struct pt_context *ctx)
 	}
 
 #ifndef NDEBUG
-	if (ctx->pkt_in.type != PACKET_PING)
+	if (ctx->pkt_in.type != PACKET_PING && ctx->pkt_in.type != PACKET_PT5_PING)
 		dump_packet(0, &ctx->pkt_in);
 #endif
 
@@ -166,19 +166,26 @@ void packet_out(struct pt_context *ctx)
 	/* Deref underlying packets */
 	i = 0;
 	do {
-		if (ctx->pkts_out[i]->remaining >= (size_t)bp) {
-			ctx->pkts_out[i]->remaining -= (size_t)bp;
+		if (ctx->remaining[i] >= (size_t)bp) {
+			ctx->remaining[i] -= (size_t)bp;
 			bp = 0;
-		} else bp -= ctx->pkts_out[i]->remaining;
+		} else {
+			bp -= ctx->remaining[i];
+			ctx->remaining[i] = 0;
+		}
 
-		if (!--ctx->pkts_out[i]->refcnt)
+		if (!ctx->remaining[i])
 			free_packet(ctx->pkts_out[i]);
 	} while (bp && ++i < ctx->npkts_out);
 
 	if (!(ctx->npkts_out -= i + 1)) {
 		free(ctx->pkts_out);
-		ctx->pkts_out = NULL;
+		free(ctx->remaining);
+		ctx->pkts_out  = NULL;
+		ctx->remaining = NULL;
 	} else {
+		memmove(ctx->remaining, ctx->remaining + i + 1,
+		        (ctx->npkts_out - i + 1) * sizeof *ctx->remaining);
 		memmove(ctx->pkts_out, ctx->pkts_out + i + 1,
 		       (ctx->npkts_out - i + 1) * sizeof(struct pt_packet *));
 	}
@@ -222,27 +229,30 @@ struct pt_packet *new_packet(unsigned short type, unsigned short len, const char
 
 void send_packet(struct pt_context *ctx, struct pt_packet *pkt)
 {
+	int e;
 	size_t pos, newlen;
 
-	assert(ctx);
-	pos    = ctx->pkt_out.msg_iovlen;
-	newlen = (pos + (pkt->length ? 4 : 3)) * sizeof(struct iovec);
-
-	if (!pkt) {
-		ERROR(("Cowardly refusing to send NULL packet"));
+	if (!pkt || !ctx) {
+		free_packet(pkt);
 		return;
 	}
+
+	e      = pkt->version & 0xff00; /**< It's already been byte-swapped */
+	pos    = ctx->pkt_out.msg_iovlen;
+	newlen = (pos + (pkt->length ? 4 : 3)) * sizeof(struct iovec);
 
 #ifndef NDEBUG
 	if (pkt->type != PACKET_PONG && pkt->type != PACKET_TIME_WRONG)
 		dump_packet(1, pkt);
 #endif
 
-	if (!(ctx->pkts_out = realloc(ctx->pkts_out, (ctx->npkts_out + 1) * sizeof(struct pt_packet *))) ||
+	if (!(ctx->pkts_out  = realloc(ctx->pkts_out,  (ctx->npkts_out + 1) * sizeof(struct pt_packet *))) ||
+	    !(ctx->remaining = realloc(ctx->remaining, (ctx->npkts_out + 1) * sizeof *ctx->remaining))     ||
 	    !(ctx->pkt_out.msg_iov = realloc(ctx->pkt_out.msg_iov, newlen)))
 		abort();
 
 	memset(ctx->pkt_out.msg_iov + pos, 0, newlen - (pos * sizeof *ctx->pkt_out.msg_iov));
+	ctx->remaining[ctx->npkts_out]         = 6;
 	ctx->pkts_out[ctx->npkts_out++]        = pkt;
 	ctx->pkt_out.msg_iov[pos].iov_base     = &pkt->type;
 	ctx->pkt_out.msg_iov[pos + 1].iov_base = &pkt->version;
@@ -253,22 +263,24 @@ void send_packet(struct pt_context *ctx, struct pt_packet *pkt)
 	ctx->pkt_out.msg_iovlen += 3;
 
 	if (pkt->length) {
-		ctx->pkt_out.msg_iov[pos + 3].iov_base = pkt->data;
-		ctx->pkt_out.msg_iov[pos + 3].iov_len  = pkt->length;
 		ctx->pkt_out.msg_iovlen++;
-		pkt->remaining = pkt->length;
-		pkt->length = htons(pkt->length);
+		ctx->pkt_out.msg_iov[pos + 3].iov_base = pkt->data;
+		ctx->pkt_out.msg_iov[pos + 3].iov_len  = e ? ntohs(pkt->length) : pkt->length;
+		ctx->remaining[ctx->npkts_out - 1]    += ctx->pkt_out.msg_iov[pos + 3].iov_len;
 	}
 
-	pkt->type      = htons(pkt->type);
-	pkt->version   = htons(pkt->version);
-	pkt->remaining += 6;
+	if (!e) {
+		pkt->type    = htons(pkt->type);
+		pkt->version = htons(pkt->version);
+		pkt->length  = htons(pkt->length);
+	}
+
 	pkt->refcnt++;
 }
 
 void free_packet(struct pt_packet *pkt)
 {
-	if (!pkt || pkt->refcnt)
+	if (!pkt || (pkt->refcnt && --pkt->refcnt))
 		return;
 
 	if (pkt->length && pkt->data && !(pkt->flags & PACKET_F_STATIC))
@@ -280,14 +292,20 @@ void dump_packet(int out, struct pt_packet *pkt)
 {
 	char hbuf[28], cbuf[9];
 	unsigned hlen = 0, clen = 0;
-	unsigned short i;
+	unsigned short i, e;
+	unsigned short type, version, len;
 
 	if (!pkt) return;
 	memset(hbuf, 0, 28);
 	memset(cbuf, 0, 9);
-	INFO(("Packet [%s]: type=%04x version=%04x length=%04x", out ? "out" : "in", pkt->type, pkt->version, pkt->length));
 
-	for (i = 0; i < pkt->length; i++) {
+	e       = out && pkt->version & 0x100;
+	type    = e ? ntohs(pkt->type)    : pkt->type;
+	version = e ? ntohs(pkt->version) : pkt->version;
+	len     = e ? ntohs(pkt->length)  : pkt->length;
+	INFO(("Packet [%s]: type=%04x version=%04x length=%04x", out ? "out" : "in", type, version, len));
+
+	for (i = 0; i < len; i++) {
 		if (i && !(i & 7)) {
 			hbuf[hlen] = 0;
 			cbuf[clen] = 0;
@@ -301,7 +319,7 @@ void dump_packet(int out, struct pt_packet *pkt)
 		cbuf[clen++] = isprint(pkt->data[i]) ? pkt->data[i] : '.';
 	}
 
-	if (i && i == pkt->length) {
+	if (i && i == len) {
 		hbuf[hlen] = 0;
 		cbuf[clen] = 0;
 		INFO(("%-24.24s%-8.8s", hbuf, cbuf));

@@ -8,7 +8,7 @@
 #ifndef FT_H
 #define FT_H
 
-#include "packet.h"
+struct pt_context;
 
 /**
  * Handle the initial file transfer request

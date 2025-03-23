@@ -24,6 +24,8 @@ struct user {
 	char banners;
 	char admin;
 	char sup;
+	char *color;
+	unsigned crown_level; /* PT 10+: For vgift givers */
 };
 
 /**

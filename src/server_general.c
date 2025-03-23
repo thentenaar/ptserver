@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <arpa/inet.h>
 
 #include "macros.h"
 #include "logging.h"
@@ -31,16 +32,20 @@ static void *offline_msg;
 #define SUCCESS_LEN                7
 #define NXUSER_LEN                12
 #define CANT_BLOCK_ADMINS_LEN     40
+#define CANT_ADD_BLOCKED_USER_LEN 62
 #define SENDER_OFFLINE_LEN        17
 #define ERROR_SENDING_REQUEST_LEN 21
-#define TOO_MANY_TRANSFERS_LEN    23
+#define CANT_SEND_TO_YOURSELF_LEN 29
+#define NO_ROOM_YET_LEN           30
 
 static const char * const success               = "Success";
 static const char * const nxuser                = "No such user";
 static const char * const cant_block_admins     = "You can't block staff or administrators";
+static const char * const cant_add_blocked_user = "You must unblock this user before adding them to your pal list";
 static const char * const sender_offline        = "Sender is offline";
 static const char * const error_sending_request = "Error sending request";
-static const char * const too_many_transfers    = "Too many file transfers";
+static const char * const cant_send_to_yourself = "Cannot send a file to yourself";
+static const char * const no_room_yet           = "You haven't created a room yet";
 
 /**
  * Non-zero if the given user exists, and isn't blocking us, or blocked by us
@@ -48,7 +53,7 @@ static const char * const too_many_transfers    = "Too many file transfers";
 static int can_send_to_user(struct pt_context *ctx, unsigned long uid)
 {
 	if (!user_exists(ctx->db_r, uid)) {
-		send_return_code(ctx, 0x63, nxuser, NXUSER_LEN);
+		send_return_code(ctx, 'x', nxuser, NXUSER_LEN);
 		return 0;
 	}
 
@@ -65,10 +70,8 @@ static void store_offline_message(struct pt_context *ctx, unsigned long uid, con
 			"?) ON CONFLICT DO NOTHING"
 		);
 
-		if (!offline_msg) {
-			ERROR(("store_offline_message: Failed to prepare query"));
+		if (!offline_msg)
 			return;
-		}
 	}
 
 	db_reset_prepared(offline_msg);
@@ -91,14 +94,14 @@ static int relay_offline_message(void *userdata, int cols, char *val[], char *co
 		return 0;
 
 	/* If we've blocked them, ignore offline messages */
-	if (i_blocked_user(ctx, atol(val[0])))
+	if (i_blocked_user(ctx, strtoul(val[0], NULL, 10)))
 		return 0;
 
 	slen = 14 + strlen(val[1]) + strlen(val[2]);
 	if (!(s = calloc(slen + 1, 1)))
 		return 0;
 
-	from_uid = atol(val[0]);
+	from_uid = strtoul(val[0], NULL, 10);
 	s[0] = (from_uid >> 24) & 0xff;
 	s[1] = (from_uid >> 16) & 0xff;
 	s[2] = (from_uid >> 8)  & 0xff;
@@ -121,8 +124,8 @@ static int send_global_numbers(void *userdata, int cols, char *val[], char *col[
 	if (!ctx || cols != 2)
 		return 0;
 
-	users = atol(val[0]);
-	rooms = atol(val[1]);
+	users = strtoul(val[0], NULL, 10);
+	rooms = strtoul(val[1], NULL, 10);
 	buf[0] = (users >> 24) & 0xff;
 	buf[1] = (users >> 16) & 0xff;
 	buf[2] = (users >> 8)  & 0xff;
@@ -156,7 +159,12 @@ void general_transition(struct pt_context *ctx)
 
 	/* Add smtp= */
 	/* TODO: smtp support */
-	s = pt_encode_with_challenge(ctx, 2, 0x19, "127.0.0.1:25:user:pass");
+	sprintf(buf, "%u.%u.%u.%u:25:user:pass",
+	       (ctx->server_ip >> 24) & 0xff,
+	       (ctx->server_ip >> 16) & 0xff,
+	       (ctx->server_ip >> 8)  & 0xff,
+	       ctx->server_ip & 0xff);
+	s = pt_encode_with_challenge(ctx, 2, 0x19, buf);
 	s2 = append_field(s2, "smtp", s);
 	free(s);
 	send_packet(ctx, new_packet(PACKET_USER_DATA, strlen(s2), s2, 0));
@@ -172,23 +180,33 @@ void general_transition(struct pt_context *ctx)
 	/**
 	 * Category list
 	 */
-	/* 5.1 assumes these don't change once given, and needs list=2  */
-	s = NULL;
-	buf[0] = '\0';
-	strcpy(buf, "SELECT * FROM categories JOIN (SELECT 2 AS list)");
+	if (ctx->protocol_version < PROTOCOL_VERSION_82) {
+		/* 5.1 assumes these don't change once given, and needs list=2  */
+		s = NULL;
+		buf[0] = '\0';
+		strcpy(buf, "SELECT list, catg AS code, name AS value FROM categories JOIN (SELECT 2 AS list)");
 
-	/**
-	 * We include these so that the theoretical 5.x user can view them
-	 * also.
-	 */
-	if (ctx->protocol_version >= PROTOCOL_VERSION_70) {
-		sprintf(buf + strlen(buf),
-	        " WHERE code NOT IN (%d,%d)", CATEGORY_TOP, CATEGORY_FEATURED);
+		/**
+		 * We include these so that the theoretical 5.x user can view them
+		 * also.
+		 */
+		if (ctx->protocol_version >= PROTOCOL_VERSION_70) {
+			sprintf(buf + strlen(buf),
+			        " WHERE code NOT IN (%d,%d)", CATEGORY_TOP, CATEGORY_FEATURED);
+		}
+
+		if (!db_exec(ctx->db_r, &s, buf, db_row_to_record) && s)
+			send_packet(ctx, new_packet(PACKET_CATEGORY_LIST, strlen(s), s, 0));
+		else free(s);
+	} else { /* PT 8.2+ (disp=0 means "don't sort") */
+		s = NULL;
+		sprintf(buf,
+		        "SELECT catg,  disp, name FROM categories "
+		        "WHERE catg NOT IN (%d,%d) ORDER BY name ASC",
+		        CATEGORY_TOP, CATEGORY_FEATURED);
+		if (!db_exec(ctx->db_r, &s, buf, db_row_to_record) && s)
+			send_packet(ctx, new_packet(PACKET_NEW_CATEGORY_LIST, strlen(s), s, 0));
 	}
-
-	if (!db_exec(ctx->db_r, &s, buf, db_row_to_record) && s)
-		send_packet(ctx, new_packet(PACKET_CATEGORY_LIST, strlen(s), s, 0));
-	else free(s);
 
 	/**
 	 * Subcategory list
@@ -202,10 +220,9 @@ void general_transition(struct pt_context *ctx)
 	}
 
 	/**
-	 * Buddylist and Blocklist
+	 * Buddylist
 	 */
 	send_buddy_list(ctx, 0);
-	send_buddy_list(ctx, 1);
 
 	/**
 	 * Relay offline messages
@@ -221,15 +238,23 @@ void general_flow(struct pt_context *ctx)
 {
 	char buf[256], *s, *s2;
 	size_t len;
-	unsigned long uid = 0, rid;
+	unsigned long id = 0, id2 = 0;
 	struct pt_context *target;
 	struct pt_packet *pkt;
 
 	if (ctx->pkt_in.length >= 4) {
-		uid = ((ctx->pkt_in.data[0] & 0xff) << 24) |
+		id  = ((ctx->pkt_in.data[0] & 0xff) << 24) |
 			  ((ctx->pkt_in.data[1] & 0xff) << 16) |
 			  ((ctx->pkt_in.data[2] & 0xff) <<  8) |
 			   (ctx->pkt_in.data[3] & 0xff);
+	}
+
+	id2 = id;
+	if (ctx->pkt_in.length >= 8) {
+		id2 = ((ctx->pkt_in.data[4] & 0xff) << 24) |
+			  ((ctx->pkt_in.data[5] & 0xff) << 16) |
+			  ((ctx->pkt_in.data[6] & 0xff) <<  8) |
+			   (ctx->pkt_in.data[7] & 0xff);
 	}
 
 	switch (ctx->pkt_in.type) {
@@ -240,20 +265,20 @@ void general_flow(struct pt_context *ctx)
 		 * The client uses this to detect whether or not it can still
 		 * send on the socket.
 		 */
-		rid = (unsigned long)time(NULL);
-		ctx->time = uid;
+		id2 = (unsigned long)time(NULL);
+		ctx->time = id;
 
 		/**
 		 * This seems to be ignored by the client, but the server still
 		 * sent it.
 		 */
-		if (uid != rid)
+		if (id != id2)
 			send_packet(ctx, new_packet(PACKET_TIME_WRONG, 0, NULL, 0));
 
-		buf[0] = (rid >> 24) & 0xff;
-		buf[1] = (rid >> 16) & 0xff;
-		buf[2] = (rid >> 8)  & 0xff;
-		buf[3] = rid & 0xff;
+		buf[0] = (id2 >> 24) & 0xff;
+		buf[1] = (id2 >> 16) & 0xff;
+		buf[2] = (id2 >> 8)  & 0xff;
+		buf[3] = id2 & 0xff;
 		send_packet(ctx, new_packet(PACKET_PONG, 4, buf, PACKET_F_COPY));
 		break;
 	case PACKET_GET_LANGUAGES:
@@ -292,6 +317,7 @@ void general_flow(struct pt_context *ctx)
 	case PACKET_GET_PRIVACY:
 		buf[0] = *ctx->user.privacy;
 		send_packet(ctx, new_packet(PACKET_VERIFY_PRIVACY, 1, buf, PACKET_F_COPY));
+		send_buddy_list(ctx, 1);
 		break;
 	case PACKET_LIST_CATEGORY:
 		/**
@@ -300,23 +326,14 @@ void general_flow(struct pt_context *ctx)
 		 *   4 - 7: PT5: 00 00 00 00 [1 if a category id is given], PT 7/8: 00 00 00 01
 		 *   8 - 11: category id (or 00000000 / ffffffff)
 		 */
-	case PACKET_NEW_LIST_CATEGORY:
-		/**
-		 * PT8+: Simplification of LIST_CATEGORY
-		 *
-		 * Data:
-		 *   0 - 4: category_id (or ffffffff)
-		 */
 		s = NULL;
 		*buf = '\0';
-		if (ctx->pkt_in.type == PACKET_LIST_CATEGORY) {
-			rid = ((ctx->pkt_in.data[8]  & 0xff) << 24) |
-			      ((ctx->pkt_in.data[9]  & 0xff) << 16) |
-			      ((ctx->pkt_in.data[10] & 0xff) <<  8) |
-			       (ctx->pkt_in.data[11] & 0xff);
-		} else rid = uid;
+		id = ((ctx->pkt_in.data[8]  & 0xff) << 24) |
+		     ((ctx->pkt_in.data[9]  & 0xff) << 16) |
+		     ((ctx->pkt_in.data[10] & 0xff) <<  8) |
+		      (ctx->pkt_in.data[11] & 0xff);
 
-		if (!rid || rid == ALL_CATEGORIES) {
+		if (!id || id == ALL_CATEGORIES) {
 			if ((s = room_counts_by_category(ctx->db_r))) {
 				pkt = new_packet(PACKET_CATEGORY_COUNTS, strlen(s), s, 0);
 				send_packet(ctx, pkt);
@@ -325,14 +342,28 @@ void general_flow(struct pt_context *ctx)
 			break;
 		}
 
-		if ((s = rooms_for_category(ctx->db_r, ctx->protocol_version, rid))) {
+		if ((s = rooms_for_category(ctx->db_w, ctx->protocol_version, id))) {
 			send_packet(ctx, new_packet(
 				(ctx->protocol_version >= PROTOCOL_VERSION_82 &&
-				 rid != CATEGORY_FEATURED && rid != CATEGORY_TOP) ?
+				 id != CATEGORY_FEATURED && id != CATEGORY_TOP) ?
 				PACKET_NEW_ROOM_LIST : PACKET_ROOM_LIST,
 				strlen(s), s, 0
 			));
 		}
+		break;
+	case PACKET_NEW_LIST_CATEGORY:
+		/**
+		 * PT8+: Simplification of LIST_CATEGORY
+		 * PT9+: Lists subcategories and number of rooms for a category
+		 *
+		 * Data:
+		 *   0 - 4: category_id (or ffffffff)
+		 */
+		s = NULL;
+		*buf = '\0';
+
+		if ((s = rooms_and_subcategories_for_category(ctx->db_w, id)))
+			send_packet(ctx, new_packet(PACKET_NEW_ROOM_LIST, strlen(s), s, 0));
 		break;
 	case PACKET_LIST_SUBCATEGORY:
 		/**
@@ -342,18 +373,8 @@ void general_flow(struct pt_context *ctx)
 		 *   0 - 3: Category id
 		 *   4 - 7: Subcategory id
 		 */
-		rid = ((ctx->pkt_in.data[4] & 0xff) << 24) |
-			  ((ctx->pkt_in.data[5] & 0xff) << 16) |
-			  ((ctx->pkt_in.data[6] & 0xff) <<  8) |
-			   (ctx->pkt_in.data[7] & 0xff);
-
-		if ((s = rooms_for_subcategory(ctx->db_r, uid, rid))) {
-			send_packet(ctx, new_packet(
-			    (ctx->protocol_version >= PROTOCOL_VERSION_82)
-			    ? PACKET_NEW_ROOM_LIST : PACKET_SUBCATEGORY_ROOM_LIST,
-			    strlen(s), s, 0)
-			);
-		}
+		if ((s = rooms_for_subcategory(ctx->db_w, id, id2)))
+			send_packet(ctx, new_packet(PACKET_SUBCATEGORY_ROOM_LIST, strlen(s), s, 0));
 		break;
 	case PACKET_SEND_GLOBAL_NUMBERS:
 		/**
@@ -370,24 +391,20 @@ void general_flow(struct pt_context *ctx)
 		 * Data: status (32 bits)
 		 *
 		 * PT 8.2 has an optional status message following the status.
-		 * PT 9.1 always includes the status message, with a preceeding byte.
-		 *        TODO: figure out what that preceeding byte is.
-		 * PT 10.2 no longer includes the extra byte.
+		 * PT 9.1+ always includes the status message.
 		 */
-		ctx->status = uid;
+		ctx->status = id;
 		if (ctx->pkt_in.version >= PROTOCOL_VERSION_82) {
 			if (ctx->status_msg) {
 				free(ctx->status_msg);
 				ctx->status_msg = NULL;
 			}
 
-			rid = 4 + (ctx->pkt_in.version >= PROTOCOL_VERSION_91 &&
-			           ctx->pkt_in.version < PROTOCOL_VERSION_102);
-			if (ctx->pkt_in.length > rid) {
-				len = min(STATUSMSG_MAX, ctx->pkt_in.length - rid);
+			if (ctx->pkt_in.length > 4) {
+				len = min(STATUSMSG_MAX, ctx->pkt_in.length - 4);
 				if (!(ctx->status_msg = calloc(len + 1, 1)))
 					abort();
-				memcpy(ctx->status_msg, ctx->pkt_in.data + rid, len);
+				memcpy(ctx->status_msg, ctx->pkt_in.data + 4, len);
 			}
 		}
 
@@ -402,7 +419,7 @@ void general_flow(struct pt_context *ctx)
 		 * I'm surprised the length isn't limited client-side.
 		 */
 		ctx->pkt_in.data[4 + min(NICKNAME_MAX, ctx->pkt_in.length - 4)] = '\0';
-		set_buddy_display(ctx, uid, ctx->pkt_in.data + 4);
+		set_buddy_display(ctx, id, ctx->pkt_in.data + 4);
 		break;
 	case PACKET_ADD_BUDDY:
 		/**
@@ -411,9 +428,14 @@ void general_flow(struct pt_context *ctx)
 		 * Response:
 		 *   (entire buddy list)
 		 */
-		if (!can_send_to_user(ctx, uid))
+		if (i_blocked_user(ctx, id)) {
+			send_return_code(ctx, 'x', cant_add_blocked_user, CANT_ADD_BLOCKED_USER_LEN);
 			break;
-		add_buddy(ctx, uid);
+		}
+
+		if (!can_send_to_user(ctx, id))
+			break;
+		add_buddy(ctx, id);
 		send_buddy_list(ctx, 0);
 		break;
 	case PACKET_REMOVE_BUDDY:
@@ -423,9 +445,9 @@ void general_flow(struct pt_context *ctx)
 		 * Response:
 		 *   0 - 4: UID of removed buddy
 		 */
-		remove_buddy(ctx, uid);
-		uid = htonl(uid);
-		pkt = new_packet(PACKET_BUDDY_REMOVED, 4, (void *)&uid, PACKET_F_COPY);
+		remove_buddy(ctx, id);
+		id = htonl(id);
+		pkt = new_packet(PACKET_BUDDY_REMOVED, 4, (void *)&id, PACKET_F_COPY);
 		send_packet(ctx, pkt);
 		break;
 	case PACKET_BLOCK_BUDDY:
@@ -439,9 +461,9 @@ void general_flow(struct pt_context *ctx)
 		 */
 		memset(buf, 0, 14);
 		memcpy(buf, ctx->pkt_in.data, 4);
-		buf[5] = 1;
+		buf[5] = 0;
 
-		if (!user_exists(ctx->db_r, uid)) {
+		if (!user_exists(ctx->db_r, id)) {
 			memcpy(buf + 6, nxuser, NXUSER_LEN);
 			pkt = new_packet(PACKET_BLOCK_RESPONSE, 6 + NXUSER_LEN,
 			                 buf, PACKET_F_COPY);
@@ -449,7 +471,7 @@ void general_flow(struct pt_context *ctx)
 			break;
 		}
 
-		if (user_is_staff(ctx->db_r, uid)) {
+		if (user_is_staff(ctx->db_r, id)) {
 			memcpy(buf + 6, cant_block_admins, CANT_BLOCK_ADMINS_LEN);
 			pkt = new_packet(PACKET_BLOCK_RESPONSE,
 			                 6 + CANT_BLOCK_ADMINS_LEN, buf, PACKET_F_COPY);
@@ -457,14 +479,14 @@ void general_flow(struct pt_context *ctx)
 			break;
 		}
 
-		block_buddy(ctx, uid);
+		buf[5] = 1;
+		block_buddy(ctx, id);
 		memcpy(buf + 6, success, SUCCESS_LEN);
 		pkt = new_packet(PACKET_BLOCK_RESPONSE,
 		                 6 + SUCCESS_LEN, buf, PACKET_F_COPY);
 		send_packet(ctx, pkt);
-
-		/* In case they're still in the buddylist */
 		send_buddy_list(ctx, 1);
+		buddy_statuses(ctx);
 		break;
 	case PACKET_UNBLOCK_BUDDY:
 		/**
@@ -475,12 +497,13 @@ void general_flow(struct pt_context *ctx)
 		 *   5 - 6: Disposition (0 = unblocked, 1 = blocked)
 		 *   7 - *: Message ("Success" or error message)
 		 */
-		unblock_buddy(ctx, uid);
+		unblock_buddy(ctx, id);
 		memset(buf, 0, 14);
 		memcpy(buf, ctx->pkt_in.data, 4);
 		memcpy(buf + 6, success, SUCCESS_LEN);
 		send_packet(ctx, new_packet(PACKET_BLOCK_RESPONSE, 6 + SUCCESS_LEN, buf, PACKET_F_COPY));
-		send_buddy_list(ctx, 0);
+		send_buddy_list(ctx, 1);
+		buddy_statuses(ctx);
 		break;
 	case PACKET_SEARCH_USER:
 		/**
@@ -513,12 +536,8 @@ void general_flow(struct pt_context *ctx)
 			s = search_users(ctx->db_r, buf, strtok(NULL, "\n"));
 		}
 
-		if (s) {
-			send_packet(ctx, new_packet(
-				PACKET_SEARCH_RESULTS, strlen(s), s, 0
-			));
-		}
-
+		if (s)
+			send_packet(ctx, new_packet(PACKET_SEARCH_RESULTS, strlen(s), s, 0));
 		break;
 	case PACKET_SEARCH_ROOM:
 		/**
@@ -562,14 +581,17 @@ void general_flow(struct pt_context *ctx)
 		 *   0 - 3: Recipient UID (32 bits)
 		 *   4 - *: Message
 		 */
-		if (!can_send_to_user(ctx, uid))
+		if (!can_send_to_user(ctx, id))
 			break;
 
-		sprintf(buf, "%lu", uid);
+		sprintf(buf, "%lu", id);
 		if (!(target = ht_get_ptr_nc(uid_to_context, buf))) {
-			store_offline_message(ctx, uid, ctx->pkt_in.data + 4);
+			store_offline_message(ctx, id, ctx->pkt_in.data + 4);
 			break;
 		}
+
+		if (target == ctx)
+			break;
 
 		ctx->pkt_in.data[0] = (ctx->uid >> 24) & 0xff;
 		ctx->pkt_in.data[1] = (ctx->uid >> 16) & 0xff;
@@ -591,27 +613,9 @@ void general_flow(struct pt_context *ctx)
 		 *   4 - 7: Sender uid (32 bits)
 		 *   8 - *: Message
 		 */
-		if (room_command(ctx, uid, ctx->pkt_in.data + 4)) break;
-		if (user_is_invisible(ctx, uid, ctx->uid))        break;
-
-		/**
-		 * TODO: if text is reddotted at the room level, ignore any
-		 * messages from non-admins
-		 */
-
-		if (!(s = malloc(ctx->pkt_in.length + 4)))
-			abort();
-
-		memcpy(s, ctx->pkt_in.data, 4);
-		s[4] = (ctx->uid >> 24) & 0xff;
-		s[5] = (ctx->uid >> 16) & 0xff;
-		s[6] = (ctx->uid >> 8)  & 0xff;
-		s[7] = ctx->uid & 0xff;
-
-		memcpy(s + 8, ctx->pkt_in.data + 4, ctx->pkt_in.length - 4);
-		broadcast_to_room(ctx, uid, new_packet(
-			PACKET_ROOM_MESSAGE_IN, ctx->pkt_in.length + 4, s, 0
-		));
+		if (room_command(ctx, id, ctx->pkt_in.data + 4)) break;
+		if (user_is_invisible(ctx->db_w, id, ctx->uid))  break;
+		send_room_message(ctx, NULL, id, ctx->uid, ctx->pkt_in.length - 4, ctx->pkt_in.data + 4);
 		break;
 	case PACKET_NUDGE_OUT:
 		/**
@@ -623,10 +627,6 @@ void general_flow(struct pt_context *ctx)
 		 *   4 - 7: room id (32 bits) [Room] or 00 00 00 00 [IM]
 		 *   8 - 11: Nudge type (1=car horn, 2=fog horn, 3=monkey)
 		 */
-		rid = ((ctx->pkt_in.data[4] & 0xff) << 24) |
-			  ((ctx->pkt_in.data[5] & 0xff) << 16) |
-			  ((ctx->pkt_in.data[6] & 0xff) <<  8) |
-			   (ctx->pkt_in.data[7] & 0xff);
 
 		/* The first three dwords mirror the input packet */
 		memcpy(buf, ctx->pkt_in.data, 12);
@@ -638,11 +638,11 @@ void general_flow(struct pt_context *ctx)
 		buf[14] = (ctx->uid >> 8)  & 0xff;
 		buf[15] = ctx->uid & 0xff;
 
-		if (uid) {
-			if (!can_send_to_user(ctx, uid))
+		if (id) {
+			if (!can_send_to_user(ctx, id))
 				break;
 
-			sprintf(buf, "%ld", uid);
+			sprintf(buf, "%ld", id);
 			if (!(target = ht_get_ptr_nc(uid_to_context, buf)))
 				break;
 
@@ -650,25 +650,108 @@ void general_flow(struct pt_context *ctx)
 				break;
 
 			send_packet(target, new_packet(PACKET_NUDGE_IN, 16, buf, PACKET_F_COPY));
-		} else if (rid) {
-			/* TODO: Make sure the target room user isn't ignoring the sender */
-			broadcast_to_room(ctx, rid, new_packet(PACKET_NUDGE_IN, 16, buf, PACKET_F_COPY));
+		} else if (id2)
+			broadcast_to_unignored(ctx, id2, new_packet(PACKET_NUDGE_IN, 16, buf, PACKET_F_COPY));
+		break;
+	case PACKET_ROOM_IGNORE_USER:
+		/**
+		 * PT 7+: Ignore a user in a room
+		 * Data: room id, target uid, 00 00 - off, 00 01 - on
+		 */
+		if (ctx->pkt_in.length == 10)
+			ignore(ctx, id, id2, ctx->pkt_in.data[8] | ctx->pkt_in.data[9]);
+		break;
+	case PACKET_GET_MY_ROOM_INFO:
+		if (!(s = get_my_room_info(ctx->db_w, ctx->uid))) {
+			send_return_code(ctx, 'x', no_room_yet, NO_ROOM_YET_LEN);
+			break;
 		}
+
+		send_packet(ctx, new_packet(PACKET_MY_ROOM_INFO, strlen(s), s, 0));
+		break;
+	case PACKET_JOIN_MY_ROOM:
+		/**
+		 * Data:
+		 *   0 - 3: constant 0x0000082a
+		 */
+		if (!(id = owners_room(ctx->db_r, ctx->uid))) {
+			send_return_code(ctx, 'x', no_room_yet, NO_ROOM_YET_LEN);
+			break;
+		}
+
+		join(ctx, id, 0, NULL, 0);
+		break;
+	case PACKET_JOIN_FAVORITE_ROOM:
+		/**
+		 * Data: fields (k=v):
+		 * 	- aff   (1)   Affiliate?
+		 * 	- name
+		 * 	- invis (0|1)
+		 * 	- port  (2090)
+		 * 	- lock  (password)
+		 */
+		id2 = 0;
+		s2  = NULL;
+		if (!(s = strtok(ctx->pkt_in.data, "\n")))
+			break;
+
+		do {
+			if (!memcmp(s, "name=", 5) &&
+			    UID_IS_ERROR((id = name_to_room(ctx->db_r, s + 5))))
+				break;
+			else if (!memcmp(s, "lock=", 5))  s2  = s + 5;
+			else if (!memcmp(s, "invis=", 6)) id2 = s[6] != '0';
+		} while ((s = strtok(NULL, "\n")));
+
+		join(ctx, id, 0, s2, id2);
 		break;
 	case PACKET_ROOM_CREATE:
-		break;
-	case PACKET_ROOM_CLOSE:
+		/**
+		 * PT 5.x: Create a (temporary) room
+		 *
+		 * Data:
+		 *   0 - 1:  Room type
+		 *   2 - 3:  00 00 (constant)
+		 *   4 - 5:  Room Category
+		 *   6 - 9:  Default voice port (0x0000082a)
+		 *   10   :  Rating (G / R / A)
+		 *   11 - *: Name [\npassword]
+		 */
+		if (ctx->pkt_in.length < 12)
+			break;
+		s = strtok(ctx->pkt_in.data + 11, "\n");
+		create_room(ctx, (id >> 16) & 7, (id2 >> 16) & 0xffff, 0,
+		            ctx->pkt_in.data[10], s, strtok(NULL, "\n"));
 		break;
 	case PACKET_ROOM_JOIN:
+		/**
+		 * Data:
+		 *   0  - 3: room id
+		 *   4  - 5: unknown (0)
+		 *   6  - 9: 0x0000082a (default incoming udp voice port)
+		 *   10 - *: room password
+		 */
+		join(ctx, id, 0, ctx->pkt_in.length > 10 ? ctx->pkt_in.data + 10 : NULL, 0);
+		break;
 	case PACKET_ROOM_JOIN_AS_ADMIN:
 		/**
 		 * Data:
-		 *   0 - 3: room id
-		 *   4 - 7: admin code (0 if none)
-		 *   8 - 9: 0x082a (default incoming udp voice port)
+		 *   0  - 3:  owner uid
+		 *   4  - 7:  admin code (0 if none)
+		 *   8  - 11: 0x082a (default incoming udp voice port)
 		 */
+		if (!(id = owners_room(ctx->db_r, ctx->uid)))
+			break;
+	case PACKET_ROOM_JOIN_AS_ADMIN2:
+		/**
+		 * Data:
+		 *   0  - 3:  room id
+		 *   4  - 7:  admin code (0 if none)
+		 *   8  - 11: 0x082a (default incoming udp voice port)
+		 */
+		join(ctx, id, id2, NULL, 0);
 		break;
-	case PACKET_ROOM_LEAVE:
+	case PACKET_ROOM_PART:
 		/**
 		 * Data: room id
 		 *
@@ -676,14 +759,54 @@ void general_flow(struct pt_context *ctx)
 		 *   0 - 3: room id
 		 *   4 - 7: user id
 		 */
-		memcpy(buf, ctx->pkt_in.data, 4);
-		buf[4] = (ctx->uid >> 24) & 0xff;
-		buf[5] = (ctx->uid >> 16) & 0xff;
-		buf[6] = (ctx->uid >> 8)  & 0xff;
-		buf[7] = ctx->uid & 0xff;
-		broadcast_to_room(ctx, uid, new_packet(PACKET_ROOM_USER_LEFT, 8, buf, PACKET_F_COPY));
-		sprintf(buf, "DELETE FROM room_users WHERE id=%ld AND uid=%ld", uid, ctx->uid);
-		db_exec(ctx->db_w, NULL, buf, NULL);
+		part(ctx, id);
+		break;
+	case PACKET_ROOM_INVITE_OUT:
+		/**
+		 * Data: room id, uid
+		 *
+		 * Reply (to uid):
+		 *   uid=int
+		 *   nickname=str
+		 *   first=str      << Mandatory for PT 5.x
+		 *   last=str       << Mandatory for PT 5.x
+		 *   group_id=int
+		 *   group_name=str
+		 *   type=int
+		 *   lock=Y/N       << If present, requires a password for entry.
+		 */
+		room_invite(ctx, id, id2);
+		break;
+	case PACKET_ROOM_GRANT_ADMIN:
+		/**
+		 * PT 5+ (Reply is ignored in clients > 5.1)
+		 * TODO: Determine if/how this gets sent by the client
+		 *
+		 * Data:
+		 *   0 - 3: room id
+		 *   4 - 7: user id
+		 *
+		 * Reply:
+		 *   0 - 3: room id
+		 */
+		room_admin(ctx, id, id2, 1);
+		break;
+	case PACKET_ROOM_MUTE:
+		/**
+		 * PT 7+
+		 * Data:
+		 *   0 - 3: room id
+		 *   4 - 5: 00 00 - off, 00 01 - on
+		 *
+		 * Response:
+		 *   0 - 3: room id
+		 *   4 - 7: uid
+		 *   8 - 9: 00 00 - off, 00 01 - on
+		 */
+		mute_room(ctx, id, !!(ctx->pkt_in.data[4] | ctx->pkt_in.data[5]));
+		break;
+	case PACKET_ROOM_CLOSE:
+		close_room(ctx, id, NULL);
 		break;
 	case PACKET_ROOM_GET_ADMIN_INFO:
 		/**
@@ -697,29 +820,8 @@ void general_flow(struct pt_context *ctx)
 		 *   bounce=\n \n \n \n \xc8 -- list of user ids, \n delimited
 		 *   ban=\n \n \n \n \n \xc8 -- list of user ids, \n delimited
 		 */
-		if ((s = get_admin_info(ctx, uid)))
+		if ((s = get_admin_info(ctx, id)))
 			send_packet(ctx, new_packet(PACKET_ROOM_ADMIN_INFO, strlen(s), s, 0));
-		break;
-	case PACKET_ROOM_MUTE:
-		/**
-		 * Data:
-		 *   0 - 3: room id
-		 *   4 - 5: 00 00 - off, 00 01 - on
-		 *
-		 * Response:
-		 *   0 - 3: room id
-		 *   4 - 7: uid
-		 *   8 - 9: 00 00 - off, 00 01 - on
-		 */
-		memcpy(buf, ctx->pkt_in.data, 4);
-		buf[4] = (ctx->uid >> 24) & 0xff;
-		buf[5] = (ctx->uid >> 16) & 0xff;
-		buf[6] = (ctx->uid >> 8)  & 0xff;
-		buf[7] = ctx->uid & 0xff;
-		buf[8] = '\0';
-		buf[9] = !!(ctx->pkt_in.data[4] | ctx->pkt_in.data[5]);
-		pkt = new_packet(PACKET_ROOM_USER_MUTE, 10, buf, PACKET_F_COPY);
-		broadcast_to_room(ctx, uid, pkt);
 		break;
 	case PACKET_ROOM_REDDOT_USER:
 	case PACKET_ROOM_UNREDDOT_USER:
@@ -730,13 +832,7 @@ void general_flow(struct pt_context *ctx)
 		 *
 		 * Response: room id, uid
 		 */
-		rid = uid;
-		uid = ((ctx->pkt_in.data[4] & 0xff) << 24) |
-			  ((ctx->pkt_in.data[5] & 0xff) << 16) |
-			  ((ctx->pkt_in.data[6] & 0xff) <<  8) |
-			   (ctx->pkt_in.data[7] & 0xff);
-
-		reddot_user(ctx, rid, uid, ctx->pkt_in.type == PACKET_ROOM_REDDOT_USER);
+		reddot_user(ctx, id, id2, ctx->pkt_in.type == PACKET_ROOM_REDDOT_USER);
 		break;
 	case PACKET_ROOM_HAND_UP:
 	case PACKET_ROOM_HAND_DOWN:
@@ -745,7 +841,7 @@ void general_flow(struct pt_context *ctx)
 		 *
 		 * Response: room id, uid
 		 */
-		raise_hand(ctx, uid, ctx->pkt_in.type == PACKET_ROOM_HAND_UP);
+		raise_hand(ctx, id, ctx->pkt_in.type == PACKET_ROOM_HAND_UP);
 		break;
 	case PACKET_ROOM_SET_ALL_MICS:
 		/**
@@ -756,66 +852,42 @@ void general_flow(struct pt_context *ctx)
 		 * Response:
 		 *   Appends the sender's uid
 		 */
-		set_all_mics(ctx, uid, ctx->pkt_in.data[4] | ctx->pkt_in.data[5]);
+		set_all_mics(ctx, id, ctx->pkt_in.data[4] | ctx->pkt_in.data[5]);
 		break;
 	case PACKET_ROOM_LOWER_ALL_HANDS:
 		/**
 		 * Data: room id
 		 */
-		lower_all_hands(ctx, uid);
+		lower_all_hands(ctx, id);
 		break;
 	case PACKET_ROOM_SET_TOPIC:
 		/**
 		 * Data: room id, topic
 		 */
-		room_topic(ctx, uid, ctx->pkt_in.data + 4);
+		room_topic(ctx, id, ctx->pkt_in.data + 4);
 		break;
 	case PACKET_ROOM_BAN_USER:
 		/**
 		 * Data: room id, uid
 		 */
-		rid = uid;
-		uid = ((ctx->pkt_in.data[4] & 0xff) << 24) |
-			  ((ctx->pkt_in.data[5] & 0xff) << 16) |
-			  ((ctx->pkt_in.data[6] & 0xff) <<  8) |
-			   (ctx->pkt_in.data[7] & 0xff);
-
-		ban_user(ctx, rid, uid);
+		ban_user(ctx, id, id2);
 		break;
 	case PACKET_ROOM_UNBAN_USER:
 		/**
 		 * Data: room id, uid
 		 */
-		rid = uid;
-		uid = ((ctx->pkt_in.data[4] & 0xff) << 24) |
-			  ((ctx->pkt_in.data[5] & 0xff) << 16) |
-			  ((ctx->pkt_in.data[6] & 0xff) <<  8) |
-			   (ctx->pkt_in.data[7] & 0xff);
-
-		unban_user(ctx, rid, uid);
+		unban_user(ctx, id, id2);
 		break;
 	case PACKET_ROOM_BOUNCE_USER:
 	case PACKET_ROOM_BOUNCE_REASON:
 		/**
 		 * Data: room id, uid, [reason]
 		 */
-		rid = uid;
-		uid = ((ctx->pkt_in.data[4] & 0xff) << 24) |
-			  ((ctx->pkt_in.data[5] & 0xff) << 16) |
-			  ((ctx->pkt_in.data[6] & 0xff) <<  8) |
-			   (ctx->pkt_in.data[7] & 0xff);
-
 		s = ctx->pkt_in.length > 8 ? ctx->pkt_in.data + 8 : NULL;
-		bounce_user(ctx, rid, uid, s);
+		bounce_user(ctx, id, id2, s);
 		break;
 	case PACKET_ROOM_UNBOUNCE_USER:
-		rid = uid;
-		uid = ((ctx->pkt_in.data[4] & 0xff) << 24) |
-			  ((ctx->pkt_in.data[5] & 0xff) << 16) |
-			  ((ctx->pkt_in.data[6] & 0xff) <<  8) |
-			   (ctx->pkt_in.data[7] & 0xff);
-
-		unbounce_user(ctx, rid, uid);
+		unbounce_user(ctx, id, id2);
 		break;
 	case PACKET_ROOM_NEW_USER_MIC:
 		/**
@@ -823,7 +895,7 @@ void general_flow(struct pt_context *ctx)
 		 *   0 - 3: room id
 		 *   4 - 5: 00 00 - off, 00 01 - on
 		 */
-		new_user_mic(ctx, uid, ctx->pkt_in.data[4] | ctx->pkt_in.data[5]);
+		new_user_mic(ctx, id, ctx->pkt_in.data[4] | ctx->pkt_in.data[5]);
 		break;
 	case PACKET_ROOM_REDDOT_TEXT:
 		/**
@@ -831,7 +903,7 @@ void general_flow(struct pt_context *ctx)
 		 *   0 - 3: room id
 		 *   4 - 5: 00 00 - off, 00 01 - on
 		 */
-		reddot_text(ctx, uid, ctx->pkt_in.data[4] | ctx->pkt_in.data[5]);
+		reddot_text(ctx, id, ctx->pkt_in.data[4] | ctx->pkt_in.data[5]);
 		break;
 	case PACKET_ROOM_REDDOT_VIDEO:
 		/**
@@ -839,7 +911,7 @@ void general_flow(struct pt_context *ctx)
 		 *   0 - 3: room id
 		 *   4 - 5: 00 00 - off, 00 01 - on
 		 */
-		reddot_video(ctx, uid, ctx->pkt_in.data[4] | ctx->pkt_in.data[5]);
+		reddot_video(ctx, id, ctx->pkt_in.data[4] | ctx->pkt_in.data[5]);
 		break;
 	case PACKET_DCC_XFER_INIT:
 		/**
@@ -847,6 +919,10 @@ void general_flow(struct pt_context *ctx)
 		 *   0 - 3: uid
 		 *   4 - 5: port (2090 - hard coded)
 		 */
+		if (ctx->uid == id) {
+			send_return_code(ctx, 'x', cant_send_to_yourself, CANT_SEND_TO_YOURSELF_LEN);
+			break;
+		}
 	case PACKET_FILE_XFER_INIT:
 	case PACKET_IMG_XFER_INIT:
 		/**
@@ -859,11 +935,19 @@ void general_flow(struct pt_context *ctx)
 		 *   4 - 7: xfer id
 		 *   8 - *: filename \n nickname
 		 */
-		sprintf(buf, "%lu", uid);
-		rid  = !can_send_to_user(ctx, uid);
-		rid |= !(target = ht_get_ptr_nc(uid_to_context, buf)) << 1;
-		rid |= (target && !is_buddy(target, ctx->uid) && (*target->user.privacy != 'A')) << 2;
-		if (rid || ft_xfer_init(ctx, target)) {
+		if (ctx->uid == id) {
+			memcpy(buf, ctx->pkt_in.data, 4);
+			memset(buf + 4, 0, 4);
+			memcpy(buf + 8, cant_send_to_yourself, CANT_SEND_TO_YOURSELF_LEN);
+			send_packet(ctx, new_packet(PACKET_FILE_XFER_ERROR, 8 + CANT_SEND_TO_YOURSELF_LEN, buf, PACKET_F_COPY));
+			break;
+		}
+
+		sprintf(buf, "%lu", id);
+		id2  = !can_send_to_user(ctx, id);
+		id2 |= !(target = ht_get_ptr_nc(uid_to_context, buf)) << 1;
+		id2 |= (target && !is_buddy(target, ctx->uid) && (*target->user.privacy != 'A')) << 2;
+		if (id2 || ft_xfer_init(ctx, target)) {
 			if (ctx->pkt_in.type == PACKET_DCC_XFER_INIT) {
 				ctx->pkt_in.type = PACKET_DCC_XFER_REJECTED;
 				send_packet(ctx, &ctx->pkt_in);
@@ -899,11 +983,11 @@ void general_flow(struct pt_context *ctx)
 		 *   0 - 3: sender uid
 		 *   4 - 7: xfer id
 		 */
-		sprintf(buf, "%lu", uid);
-		rid  = !can_send_to_user(ctx, uid);
-		rid |= !(target = ht_get_ptr_nc(uid_to_context, buf)) << 1;
-		rid |= (target && !is_buddy(target, ctx->uid) && (*target->user.privacy != 'A')) << 2;
-		if (rid || ft_xfer_accept(target, ctx)) {
+		sprintf(buf, "%lu", id);
+		id2  = !can_send_to_user(ctx, id);
+		id2 |= !(target = ht_get_ptr_nc(uid_to_context, buf)) << 1;
+		id2 |= (target && !is_buddy(target, ctx->uid) && (*target->user.privacy != 'A')) << 2;
+		if (id2 || ft_xfer_accept(target, ctx)) {
 			if (ctx->protocol_version >= PROTOCOL_VERSION_70) {
 				memcpy(buf, ctx->pkt_in.data, 8);
 				memcpy(buf + 8, sender_offline, SENDER_OFFLINE_LEN);
@@ -916,11 +1000,11 @@ void general_flow(struct pt_context *ctx)
 		 * [PT 5.x] Data:
 		 *   0 - 3: uid
 		 */
-		sprintf(buf, "%lu", uid);
-		rid  = !can_send_to_user(ctx, uid);
-		rid |= !(target = ht_get_ptr_nc(uid_to_context, buf)) << 1;
-		rid |= (target && !is_buddy(target, ctx->uid) && (*target->user.privacy != 'A')) << 2;
-		if (!rid)
+		sprintf(buf, "%lu", id);
+		id2  = !can_send_to_user(ctx, id);
+		id2 |= !(target = ht_get_ptr_nc(uid_to_context, buf)) << 1;
+		id2 |= (target && !is_buddy(target, ctx->uid) && (*target->user.privacy != 'A')) << 2;
+		if (!id2)
 			ft_xfer_reject(target, ctx);
 		break;
 
@@ -928,6 +1012,16 @@ void general_flow(struct pt_context *ctx)
 	 * Ignored packets - placed here in this manner to document their
 	 * contents.
 	 */
+	case PACKET_PT5_E7FA:
+	case PACKET_PT5_PING:
+		/**
+		 * PT 5: Sent on a 1/minute timer by the room dialog proc
+		 */
+	case PACKET_REQUEST_014F:
+		/**
+		 * PT 8 - 10.2: Needs more research as to the function of
+		 * the 0x014f reply.
+		 */
 	case PACKET_COMMENCING_AUTOJOIN:
 		/**
 		 * [PT 7/8] 0-length, sent in response to LOGIN_SUCCESS, after

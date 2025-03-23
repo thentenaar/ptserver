@@ -19,17 +19,20 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
-#include "ft.h"
 #include "net.h"
 #include "logging.h"
 #include "database.h"
 #include "packet.h"
 #include "hash.h"
+#include "room.h"
 #include "server_handler.h"
+#include "buddylist.h"
+#include "protocol.h"
 
-
-static unsigned timeout    = 300; /**< seconds */
-static const char *db_path = "ptserver.db";
+unsigned short voice_rx_port = 8002;
+unsigned short voice_tx_port = 8003;
+static unsigned timeout      = 120; /**< seconds */
+static const char *db_path   = "ptserver.db";
 
 static volatile int force_exit;
 static void *db_w;
@@ -118,8 +121,12 @@ static void server_close(void *ctx, unsigned long conn, int fd)
 	     ntohs(c->addr.sin_port),
 	     c->on_packet ? "disconnected" : "kicked"));
 
-	if (*c->uid_str)
+	c->status = STATUS_OFFLINE;
+	if (*c->uid_str && ht_get_ptr_nc(uid_to_context, c->uid_str) == ctx) {
+		part_all(c);
+		broadcast_status(c);
 		ht_rm(uid_to_context, c->uid_str);
+	}
 
 	db_close(c->db_r);
 	pt_context_destroy(c);
@@ -196,7 +203,9 @@ int main(int argc, char *argv[])
 				goto err;
 			}
 
-			addr.sin_port = htons((unsigned short)i);
+			voice_rx_port = i + 1;
+			voice_tx_port = i + 2;
+			addr.sin_port = htons(i);
 			break;
 		case 'm': /* [m]axconn */
 			if ((i = strtoul(optarg, NULL, 10)) > MAX_CONN) {
@@ -207,7 +216,7 @@ int main(int argc, char *argv[])
 			max_conn = (unsigned)i;
 			break;
 		case 's': /* [s]erver ip */
-			if (!inet_aton(optarg, &addr.sin_addr)) {
+			if (!inet_pton(AF_INET, optarg, &addr.sin_addr)) {
 				ERROR(("Invalid value for server ip: %s", optarg));
 				goto err;
 			}
@@ -240,6 +249,7 @@ int main(int argc, char *argv[])
 			force_exit++;
 	}
 
+	INFO(("Shutting down..."));
 	for (i = 0; i < max_conn; i++)
 		net_close(i);
 
@@ -251,8 +261,9 @@ err:
 usage:
 	printf("Usage: %s [-h] [-d database_file] [-p port] [-m max_connections] "
 	       "[-s server_ip] [-t connection_timeout]\n\n", argv[0]);
-	printf("The defaults are: -d ptserver.db -p 5001 -m %u -s 0.0.0.0 -t 300\n", MAX_CONN);
-	puts("Note: the argument given for -m may be constrained by resource limits");
+	printf("The defaults are: -d ptserver.db -p 5001 -m %u -s 0.0.0.0 -t 120\n\n", MAX_CONN);
+	puts("Note: the argument given for -m may be constrained by resource limits.");
+	puts("Also, the ports used for voice rx/tx will be port + 1 and port + 2 respectively.");
 	return 0;
 }
 
