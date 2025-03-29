@@ -336,7 +336,7 @@
 #define PACKET_ROOM_SET_MIC             0x0163
 #define PACKET_ROOM_INVITE_IN           0x0168
 //#define 0x0169 /* PT 10.2+: "GroupIsLocked" TODO investigate */
-#define PACKET_TCP_VOICE_RECON          0x0176 /* PT 5+: TODO: Investigate */
+#define PACKET_TCP_VOICE_RECON          0x0176 /* Reconnect RTP socket data: room_id, 00 00 port (2 bytes) */
 //#define 0x017b /* PT 10.2+: "GroupMoveOut" TODO investigate */
 #define PACKET_ROOM_CLOSED              0x017c
 #define PACKET_ROOM_USER_REDDOT_ON      0x017d

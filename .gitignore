@@ -1,6 +1,6 @@
 .*.sw?
-*.o
-*.db
+*.[oa]
+*.db*
 .wiki
 ptserver
 

@@ -9,6 +9,9 @@
 #include "server_handler.h"
 #include "user.h"
 
+/* server.c */
+extern void *db_w;
+
 #define INCORRECT_PW_LEN 18
 static const char * const incorrect_pw = "Incorrect password";
 
@@ -46,7 +49,7 @@ void password_reset_flow(struct pt_context *ctx)
 			break;
 		}
 
-		user_set_password(ctx->db_w, ctx->uid, new_pw);
+		user_set_password(db_w, ctx->uid, new_pw);
 		send_return_code(ctx, 0, NULL, 0);
 		break;
 	case PACKET_PASSWORD_HINT:
@@ -64,8 +67,8 @@ void password_reset_flow(struct pt_context *ctx)
 		old_pw = strtok(ctx->pkt_in.data + 2, "\n");
 		new_pw = strtok(NULL, "\n");
 
-		user_set_secret_question(ctx->db_w, ctx->uid, q, old_pw);
-		user_set_password_hint(ctx->db_w, ctx->uid, new_pw);
+		user_set_secret_question(db_w, ctx->uid, q, old_pw);
+		user_set_password_hint(db_w, ctx->uid, new_pw);
 		transition_fro(ctx);
 		break;
 	default:

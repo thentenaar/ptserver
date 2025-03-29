@@ -162,21 +162,21 @@ static const char * const schema[] = {
 "	topic        TEXT,"
 "	topic_setter INTEGER REFERENCES users,"
 "	intro        TEXT,"
-"	owner        INTEGER REFERENCES users,"            /* PT 9+ */
+"	owner        INTEGER REFERENCES users,"            /* PT 9+: Room owner's nickname */
 "	code         INT DEFAULT 0,"                       /* admin code */
 "	size         INT DEFAULT 15,"                      /* PT 7+: max occupancy */
-"	premium      INT DEFAULT 0,"                       /* PT 7+ */
-"	codec        TEXT NOT NULL DEFAULT 'gsmproj.dll'," /* PT 8+ */
-"	qual         INT DEFAULT 2,"                       /* PT 8+ */
-"	channels     INT DEFAULT 1,"                       /* PT 9+ */
+"	premium      INT DEFAULT 0,"                       /* PT 7+: Non-zero if created by a premium user? */
+"	codec        TEXT NOT NULL DEFAULT 'gsmproj.dll'," /* PT 8+: Audio codec for the room */
+"	qual         INT DEFAULT 1,"                       /* PT 8+: Codec quality (sample rate) setting */
+"	channels     INT DEFAULT 1,"                       /* PT 9+: Number of simultaneous speakers (TODO: investigate) */
 "	password     TEXT,"
 "	banner_url   TEXT,"
 "	created      TEXT NOT NULL DEFAULT ''"
 ") STRICT;",
 
 /* I don't remember what these were called, but they're hard-coded. */
-"INSERT INTO rooms(id,catg,r,v,p,l,size,nm) VALUES(0x01c3, 0x7601, 'R', 1, 0, 0, 0, \"Welcome New Users\");",
-"INSERT INTO rooms(id,catg,r,v,p,l,size,nm) VALUES(0x0258, 0x7601, 'G', 1, 0, 0, 0, \"Paltalk Support\");",
+"INSERT INTO rooms(id,catg,r,v,p,l,mike,size,nm) VALUES(0x01c3, 0x7601, 'R', 1, 0, 0, 1, 0, \"Welcome New Users\");",
+"INSERT INTO rooms(id,catg,r,v,p,l,mike,size,nm) VALUES(0x0258, 0x7601, 'G', 1, 0, 0, 1, 0, \"Paltalk Support\");",
 "UPDATE rooms SET created=datetime('now','subsec');",
 
 "CREATE TABLE room_bans("
@@ -622,6 +622,9 @@ void db_close(void *db)
 {
 	unsigned i;
 	char *errmsg;
+
+	if (!db)
+		return;
 
 	for (i = 0; i < sizeof epilogue / sizeof *epilogue; i++) {
 		if (sqlite3_exec(db, epilogue[i], NULL, NULL, &errmsg) != SQLITE_OK) {

@@ -49,6 +49,12 @@ static struct pollfd fds[MAX_CONN];
 static unsigned long free_conn[MAX_CONN / (sizeof(long) << 3)];
 
 /**
+ * 1 if free, 0 otherwise
+ */
+#define conn_used(x)      !!(free_conn[x / (sizeof(long) << 3)] & (1 << ((x) % (sizeof(long) << 3))))
+#define make_conn_free(x) {free_conn[x / (sizeof(long) << 3)] &= ~(1 << ((x) % (sizeof(long) << 3)));}
+
+/**
  * DeBruijn constants for computing log2 of 32 and 64-bit integers
  */
 #if !(defined(__GNUC__) || !defined(__clang__)) || !__has_builtin(__builtin_clzl)
@@ -124,6 +130,7 @@ static unsigned long net_accept(unsigned long parent, int fd,
 	if ((newfd = accept(fd, addr, addrlen)) < 0)
 		goto err;
 
+	fcntl(newfd, F_SETFD, fcntl(newfd, F_GETFD) | FD_CLOEXEC);
 	if (addr->sa_family == AF_INET) {
 		l.l_onoff  = 1;
 		l.l_linger = 1;
@@ -155,7 +162,7 @@ unsigned long net_conn(void *ctx, const struct netconn_ops *ops,
                        struct sockaddr *addr, socklen_t addrlen,
                        unsigned flags)
 {
-	int fd = -1, one = 1;
+	int fd = -1, one = 1, sv[2] = { -1, -1 };
 	unsigned long id = ULONG_MAX;
 	struct linger l;
 	struct rlimit rl;
@@ -165,6 +172,7 @@ unsigned long net_conn(void *ctx, const struct netconn_ops *ops,
 		if (!getrlimit(RLIMIT_NOFILE, &rl))
 			max_conn = (rl.rlim_cur == RLIM_INFINITY) ? MAX_CONN : rl.rlim_cur;
 		max_conn = min(max_conn, MAX_CONN);
+		memset(fds, -1, sizeof fds);
 	}
 
 	if (!ops) {
@@ -172,18 +180,30 @@ unsigned long net_conn(void *ctx, const struct netconn_ops *ops,
 		goto err;
 	}
 
-	if (!addr) {
-		ERROR(("No address specified"));
-		goto err;
+	if (flags & CONN_SOCKETPAIR) {
+		fd     = (flags & CONN_STREAM) ? SOCK_STREAM : SOCK_DGRAM;
+		flags &= ~(CONN_LISTEN | CONN_DEFER_CONNECT);
+		if (socketpair(AF_UNIX, fd | SOCK_NONBLOCK, 0, sv) < 0) {
+			ERROR(("failed to create socketpair"));
+			fd = -1;
+			goto err;
+		}
+
+		fd = sv[0];
+	} else {
+		if (!addr || !addrlen) {
+			ERROR(("No address / address length specified"));
+			goto err;
+		}
+
+		fd = socket(addr->sa_family, SOCK_CLOEXEC | (flags & CONN_STREAM) ? SOCK_STREAM : SOCK_DGRAM, 0);
+		if (fd < 0) {
+			ERROR(("failed to create socket"));
+			goto err;
+		}
 	}
 
-	fd = socket(addr->sa_family, (flags & CONN_STREAM) ? SOCK_STREAM : SOCK_DGRAM, 0);
-	if (fd < 0) {
-		ERROR(("failed to create socket"));
-		goto err;
-	}
-
-	if (addr->sa_family == AF_INET) {
+	if (addr && addr->sa_family == AF_INET) {
 		l.l_onoff  = 1;
 		l.l_linger = 1;
 		if (setsockopt(fd, SOL_SOCKET, SO_LINGER, &l, sizeof l))
@@ -198,13 +218,13 @@ unsigned long net_conn(void *ctx, const struct netconn_ops *ops,
 		}
 	}
 
-	if (flags & CONN_LISTEN) {
+	if (addr && flags & CONN_LISTEN) {
 		if (bind(fd, addr, addrlen))
 			goto err;
 
 		if ((flags & CONN_STREAM) && listen(fd, SOMAXCONN))
 			goto err;
-	} else if (!(flags & CONN_DEFER_CONNECT) && connect(fd, addr, addrlen))
+	} else if (addr && !(flags & CONN_DEFER_CONNECT) && connect(fd, addr, addrlen))
 		goto err;
 
 	if ((id = next_free_connection()) == ULONG_MAX)
@@ -218,12 +238,12 @@ unsigned long net_conn(void *ctx, const struct netconn_ops *ops,
 	fds[id].fd       = fd;
 	fds[id].events   = (flags & CONN_DEFER_CONNECT) ? 0 : POLLIN | POLLOUT;
 
-	if (flags & CONN_DEFER_CONNECT) {
+	if (addr && flags & CONN_DEFER_CONNECT) {
 		conns[id].conn_addrlen = addrlen;
 		memcpy(&conns[id].conn_addr, addr, addrlen);
 	}
 
-	if (ops->init) ops->init(ctx, id, fd);
+	if (ops->init) ops->init(ctx, id, fd, sv[1]);
 	return id;
 
 err:
@@ -232,12 +252,40 @@ err:
 }
 
 /**
+ * Clear the connections state (after fork), leaving the given connection
+ * with the given fd (the other end of the socketpair) as the only active
+ * entry
+ */
+void net_reset(unsigned long conn, int fd)
+{
+	unsigned i;
+
+	assert(conn < max_conn);
+	assert(fd >= 0);
+
+	/* Close any copies of file descriptors we may have inherited */
+	for (i = 0; i < max_conn; i++) {
+		if (fds[i].fd != -1 && fds[i].fd != fd && conn_used(i)) {
+			close(fds[i].fd);
+			fds[i].fd     = -1;
+			fds[i].events = 0;
+		}
+	}
+
+	memmove(fds, fds + conn, sizeof *fds);
+	memmove(conns, conns + conn, sizeof *conns);
+	memset(conns + 1, 0, sizeof conns - sizeof *conns);
+	memset(free_conn, 0, sizeof free_conn);
+	free_conn[0] |= 1;
+	fds[0].fd = fd;
+}
+
+/**
  * Set the context data for a connection
  */
 void net_set_ctx(unsigned long conn, void *ctx)
 {
 	assert(conn < max_conn);
-	assert(conns[conn].ops);
 	conns[conn].ctx = ctx;
 }
 
@@ -247,7 +295,6 @@ void net_set_ctx(unsigned long conn, void *ctx)
 void net_set_timeout(unsigned long conn, unsigned secs)
 {
 	assert(conn < max_conn);
-	assert(conns[conn].ops);
 	clock_gettime(CLOCK_MONOTONIC, &conns[conn].last_activity);
 	conns[conn].timeout = secs;
 }
@@ -258,7 +305,6 @@ void net_set_timeout(unsigned long conn, unsigned secs)
 void *net_get_ctx(unsigned long conn)
 {
 	assert(conn < max_conn);
-	assert(conns[conn].ops);
 	return conns[conn].ctx;
 }
 
@@ -305,28 +351,68 @@ err:
 	return ret;
 }
 
-int net_poll(void)
+/**
+ * Do a read on a connection, without polling
+ */
+void net_read(unsigned long conn)
+{
+	assert(conn < max_conn);
+	assert(conns[conn].ops);
+	conns[conn].ops->read(conns[conn].ctx, conn, fds[conn].fd);
+}
+
+/**
+ * Poll connections
+ *
+ * \param flags   Do reads, writes, or both
+ * \param timeout Number of milliseconds to wait for activity
+ */
+int net_poll(int flags, int timeout)
 {
 	int active;
-	unsigned i, closeit = 0;
+	unsigned i, pfl, closeit = 0;
 	unsigned long newid;
 	struct netconn *c;
 	struct timespec now;
 	struct sockaddr_in addr;
 	socklen_t addrlen;
 
-	active = poll(fds, max_conn, 2000);
+	/* Figure what we need to poll for */
+	for (i = 0; i < max_conn; i++) {
+		fds[i].events = 0;
+		if (fds[i].fd == -1 || !conns[i].ops)
+			continue;
+
+		pfl = NET_POLL_RW;
+		if (conns[i].ops->poll_events && conns[i].ctx)
+			pfl = conns[i].ops->poll_events(conns[i].ctx, i, fds[i].fd);
+
+		if (conns[i].flags & CONN_SOCKETPAIR)
+			pfl = 0;
+
+		if (conns[i].flags & CONN_LISTEN) pfl &= ~NET_POLL_W;
+		fds[i].events = ((pfl & flags & NET_POLL_R) ? POLLIN : 0) |
+		                ((pfl & flags & NET_POLL_W) ? POLLOUT : 0);
+	}
+
+again:
+	active = poll(fds, max_conn, timeout);
 	if (active < 0 && (errno == EINTR || errno == EAGAIN))
-		goto ret;
+		goto again;
 
 	if (active < 0 || clock_gettime(CLOCK_MONOTONIC, &now) < 0)
 		goto err;
 
+	/* Process active sockets */
 	for (i = 0; i < max_conn; i++) {
 		c       = conns + i;
 		closeit = 0;
 		addrlen = sizeof addr;
-		if (!c->ops) continue;
+		if (fds[i].fd == -1 || !c->ops)
+			continue;
+
+		if (!c->timeout && !fds[i].revents)
+			continue;
 
 		if (c->flags & CONN_DEFER_CONNECT) {
 			if (fds[i].events & fds[i].revents & POLLOUT) {
@@ -339,7 +425,6 @@ int net_poll(void)
 			continue;
 		}
 
-		fds[i].events = POLLIN | POLLOUT;
 		if (c->timeout && c->last_activity.tv_sec + c->timeout < now.tv_sec) {
 			errno = ETIMEDOUT;
 			if (c->ops->err) closeit = c->ops->err(c->ctx, i, fds[i].fd);
@@ -370,14 +455,13 @@ int net_poll(void)
 			continue;
 		}
 
-		if (fds[i].revents & POLLIN && c->ops->read)
+		if (fds[i].revents & POLLIN && c->ops->read && flags & NET_POLL_R)
 			c->ops->read(c->ctx, i, fds[i].fd);
 
-		if (fds[i].revents & POLLOUT && c->ops->write)
+		if (fds[i].revents & POLLOUT && c->ops->write && flags & NET_POLL_W)
 			c->ops->write(c->ctx, i, fds[i].fd);
 	}
 
-ret:
 	return 0;
 
 err:
@@ -392,10 +476,10 @@ void net_close(unsigned long conn)
 {
 	assert(conn < max_conn);
 
-	if (!conns[conn].ops)
+	if (!conn_used(conn))
 		return;
 
-	if (conns[conn].ops->close)
+	if (conns[conn].ops && conns[conn].ops->close)
 		conns[conn].ops->close(conns[conn].ctx, conn, fds[conn].fd);
 
 	if (fds[conn].fd >= 0) {
@@ -407,7 +491,7 @@ void net_close(unsigned long conn)
 	memset(fds + conn, 0, sizeof *fds);
 	fds[conn].fd = -1;
 	memset(conns + conn, 0, sizeof *conns);
-	free_conn[conn / (sizeof(long) << 3)] &= ~(1 << (conn % (sizeof(long) << 3)));
+	make_conn_free(conn);
 	return;
 }
 

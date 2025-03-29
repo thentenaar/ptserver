@@ -24,6 +24,7 @@
 #include "server_handler.h"
 
 /* from server.c */
+extern void *db_w;
 extern struct ht *uid_to_context;
 
 /* Prepared queries on db_w */
@@ -64,7 +65,7 @@ static void store_offline_message(struct pt_context *ctx, unsigned long uid, con
 {
 	if (!offline_msg) {
 		offline_msg = db_prepare(
-			ctx->db_w,
+			db_w,
 			"INSERT INTO offline_messages(from_uid, to_uid, "
 			"tstamp, msg) VALUES(?, ?, datetime('now','subsec'), "
 			"?) ON CONFLICT DO NOTHING"
@@ -230,7 +231,7 @@ void general_transition(struct pt_context *ctx)
 	sprintf(buf, "SELECT from_uid, tstamp, msg FROM offline_messages WHERE to_uid=%ld", ctx->uid);
 	if (!db_exec(ctx->db_r, ctx, buf, relay_offline_message)) {
 		sprintf(buf, "DELETE FROM offline_messages WHERE to_uid=%ld", ctx->uid);
-		db_exec(ctx->db_w, NULL, buf, NULL);
+		db_exec(db_w, NULL, buf, NULL);
 	}
 }
 
@@ -312,7 +313,7 @@ void general_flow(struct pt_context *ctx)
 			break;
 		free(ctx->user.privacy);
 		ctx->user.privacy = strdup(buf);
-		user_set_privacy(ctx->db_w, ctx->uid, buf[0]);
+		user_set_privacy(db_w, ctx->uid, buf[0]);
 		/* FALLTHRU */
 	case PACKET_GET_PRIVACY:
 		buf[0] = *ctx->user.privacy;
@@ -342,7 +343,7 @@ void general_flow(struct pt_context *ctx)
 			break;
 		}
 
-		if ((s = rooms_for_category(ctx->db_w, ctx->protocol_version, id))) {
+		if ((s = rooms_for_category(db_w, ctx->protocol_version, id))) {
 			send_packet(ctx, new_packet(
 				(ctx->protocol_version >= PROTOCOL_VERSION_82 &&
 				 id != CATEGORY_FEATURED && id != CATEGORY_TOP) ?
@@ -362,7 +363,7 @@ void general_flow(struct pt_context *ctx)
 		s = NULL;
 		*buf = '\0';
 
-		if ((s = rooms_and_subcategories_for_category(ctx->db_w, id)))
+		if ((s = rooms_and_subcategories_for_category(db_w, id)))
 			send_packet(ctx, new_packet(PACKET_NEW_ROOM_LIST, strlen(s), s, 0));
 		break;
 	case PACKET_LIST_SUBCATEGORY:
@@ -373,7 +374,7 @@ void general_flow(struct pt_context *ctx)
 		 *   0 - 3: Category id
 		 *   4 - 7: Subcategory id
 		 */
-		if ((s = rooms_for_subcategory(ctx->db_w, id, id2)))
+		if ((s = rooms_for_subcategory(db_w, id, id2)))
 			send_packet(ctx, new_packet(PACKET_SUBCATEGORY_ROOM_LIST, strlen(s), s, 0));
 		break;
 	case PACKET_SEND_GLOBAL_NUMBERS:
@@ -381,7 +382,7 @@ void general_flow(struct pt_context *ctx)
 		 * PT7+ Global stats: "x users are now in y groups!"
 		 */
 		db_exec(
-			ctx->db_w, ctx,
+			db_w, ctx,
 			"SELECT COUNT(DISTINCT uid), COUNT(DISTINCT id) FROM room_users",
 			send_global_numbers
 		);
@@ -556,7 +557,7 @@ void general_flow(struct pt_context *ctx)
 		s[0] = '%';
 		memcpy(s + 1, ctx->pkt_in.data, ctx->pkt_in.length);
 		s[ctx->pkt_in.length + 1] = '%';
-		if (!(s2 = search_rooms(ctx->db_w, ctx->protocol_version, s))) {
+		if (!(s2 = search_rooms(ctx->protocol_version, s))) {
 			free(s);
 			if (!(s = calloc(2, 1)))
 				abort();
@@ -614,7 +615,7 @@ void general_flow(struct pt_context *ctx)
 		 *   8 - *: Message
 		 */
 		if (room_command(ctx, id, ctx->pkt_in.data + 4)) break;
-		if (user_is_invisible(ctx->db_w, id, ctx->uid))  break;
+		if (user_is_invisible(id, ctx->uid))  break;
 		send_room_message(ctx, NULL, id, ctx->uid, ctx->pkt_in.length - 4, ctx->pkt_in.data + 4);
 		break;
 	case PACKET_NUDGE_OUT:
@@ -662,7 +663,7 @@ void general_flow(struct pt_context *ctx)
 			ignore(ctx, id, id2, ctx->pkt_in.data[8] | ctx->pkt_in.data[9]);
 		break;
 	case PACKET_GET_MY_ROOM_INFO:
-		if (!(s = get_my_room_info(ctx->db_w, ctx->uid))) {
+		if (!(s = get_my_room_info(ctx->uid))) {
 			send_return_code(ctx, 'x', no_room_yet, NO_ROOM_YET_LEN);
 			break;
 		}
@@ -674,7 +675,7 @@ void general_flow(struct pt_context *ctx)
 		 * Data:
 		 *   0 - 3: constant 0x0000082a
 		 */
-		if (!(id = owners_room(ctx->db_r, ctx->uid))) {
+		if (!(id = owners_room(ctx->uid))) {
 			send_return_code(ctx, 'x', no_room_yet, NO_ROOM_YET_LEN);
 			break;
 		}
@@ -697,7 +698,7 @@ void general_flow(struct pt_context *ctx)
 
 		do {
 			if (!memcmp(s, "name=", 5) &&
-			    UID_IS_ERROR((id = name_to_room(ctx->db_r, s + 5))))
+			    UID_IS_ERROR((id = name_to_room(s + 5))))
 				break;
 			else if (!memcmp(s, "lock=", 5))  s2  = s + 5;
 			else if (!memcmp(s, "invis=", 6)) id2 = s[6] != '0';
@@ -740,7 +741,7 @@ void general_flow(struct pt_context *ctx)
 		 *   4  - 7:  admin code (0 if none)
 		 *   8  - 11: 0x082a (default incoming udp voice port)
 		 */
-		if (!(id = owners_room(ctx->db_r, ctx->uid)))
+		if (!(id = owners_room(ctx->uid)))
 			break;
 	case PACKET_ROOM_JOIN_AS_ADMIN2:
 		/**
@@ -820,7 +821,7 @@ void general_flow(struct pt_context *ctx)
 		 *   bounce=\n \n \n \n \xc8 -- list of user ids, \n delimited
 		 *   ban=\n \n \n \n \n \xc8 -- list of user ids, \n delimited
 		 */
-		if ((s = get_admin_info(ctx, id)))
+		if ((s = get_admin_info(id)))
 			send_packet(ctx, new_packet(PACKET_ROOM_ADMIN_INFO, strlen(s), s, 0));
 		break;
 	case PACKET_ROOM_REDDOT_USER:

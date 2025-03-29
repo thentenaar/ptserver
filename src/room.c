@@ -13,15 +13,16 @@
 #include "database.h"
 #include "protocol.h"
 #include "packet.h"
+#include "rtp.h"
 #include "server_handler.h"
 #include "hash.h"
 #include "user.h"
 #include "room.h"
 
 /* from server.c */
+extern void *db_w;
 extern struct ht *uid_to_context;
-extern unsigned short voice_rx_port;
-extern unsigned short voice_tx_port;
+extern unsigned short voice_port;
 
 /* from user.c */
 extern const char * const colors[];
@@ -182,9 +183,9 @@ static char *get_room_user_info(struct pt_context *ctx, unsigned long rid,
 	char buf[512], *s = NULL;
 
 	sprintf(buf,
-	        room_user_fmt[(uid == UID_ALL) | (user_is_room_admin(ctx->db_w, rid, ctx->uid) << 1)],
+	        room_user_fmt[(uid == UID_ALL) | (user_is_room_admin(rid, ctx->uid) << 1)],
 	        rid, (uid == UID_ALL) ? ctx->uid : uid);
-	db_exec(ctx->db_w, &s, buf, db_row_to_record);
+	db_exec(db_w, &s, buf, db_row_to_record);
 	return s;
 }
 
@@ -303,7 +304,7 @@ static int broadcast_to_room_cb(void *userdata, int cols, char *val[], char *col
 /**
  * Non-zero if the given user is in the given room
  */
-int user_in_room(void *db_w, unsigned long rid, unsigned long uid)
+int user_in_room(unsigned long rid, unsigned long uid)
 {
 	if (!in_room) {
 		in_room = db_prepare(
@@ -323,7 +324,7 @@ int user_in_room(void *db_w, unsigned long rid, unsigned long uid)
 /**
  * Non-zero if the given user is invisble in the given room
  */
-int user_is_invisible(void *db_w, unsigned long rid, unsigned long uid)
+int user_is_invisible(unsigned long rid, unsigned long uid)
 {
 	if (!is_invis) {
 		is_invis = db_prepare(
@@ -343,7 +344,7 @@ int user_is_invisible(void *db_w, unsigned long rid, unsigned long uid)
 /**
  * Non-zero if the given user is the room owner
  */
-int user_is_owner(void *db_w, unsigned long rid, unsigned long uid)
+int user_is_owner(unsigned long rid, unsigned long uid)
 {
 	if (!is_owner) {
 		is_owner = db_prepare(
@@ -363,7 +364,7 @@ int user_is_owner(void *db_w, unsigned long rid, unsigned long uid)
 /**
  * Non-zero if the given user is a room admin and present in the room
  */
-int user_is_room_admin(void *db_w, unsigned long rid, unsigned long uid)
+int user_is_room_admin(unsigned long rid, unsigned long uid)
 {
 	if (!is_admin) {
 		is_admin = db_prepare(
@@ -387,13 +388,13 @@ void broadcast_to_room(struct pt_context *ctx, unsigned long rid,
 {
 	char buf[64];
 
-	if (!pkt || !user_in_room(ctx->db_w, rid, ctx->uid)) {
+	if (!pkt || !user_in_room(rid, ctx->uid)) {
 		free_packet(pkt);
 		return;
 	}
 
 	sprintf(buf, "SELECT uid FROM room_users WHERE id=%lu AND uid<>%lu", rid, ctx->uid);
-	db_exec(ctx->db_w, pkt, buf, broadcast_to_room_cb);
+	db_exec(db_w, pkt, buf, broadcast_to_room_cb);
 	if (!pkt->refcnt) free_packet(pkt);
 }
 
@@ -405,11 +406,11 @@ void broadcast_to_admins(struct pt_context *ctx, unsigned long rid,
 {
 	char buf[128];
 
-	if (!user_in_room(ctx->db_w, rid, ctx->uid))
+	if (!user_in_room(rid, ctx->uid))
 		goto ret;
 
 	sprintf(buf, "SELECT uid FROM room_users WHERE id=%lu AND uid<>%lu AND admin=1", rid, ctx->uid);
-	db_exec(ctx->db_w, pkt, buf, broadcast_to_room_cb);
+	db_exec(db_w, pkt, buf, broadcast_to_room_cb);
 
 ret:
 	if (!pkt->refcnt) free_packet(pkt);
@@ -423,11 +424,11 @@ void broadcast_to_non_admins(struct pt_context *ctx, unsigned long rid,
 {
 	char buf[128];
 
-	if (!user_in_room(ctx->db_w, rid, ctx->uid))
+	if (!user_in_room(rid, ctx->uid))
 		goto ret;
 
 	sprintf(buf, "SELECT uid FROM room_users WHERE id=%lu AND uid<>%lu AND admin=0", rid, ctx->uid);
-	db_exec(ctx->db_w, pkt, buf, broadcast_to_room_cb);
+	db_exec(db_w, pkt, buf, broadcast_to_room_cb);
 
 ret:
 	if (!pkt->refcnt) free_packet(pkt);
@@ -442,13 +443,13 @@ void broadcast_at_or_above(struct pt_context *ctx, unsigned long rid,
 {
 	char buf[128];
 
-	if (!user_in_room(ctx->db_w, rid, ctx->uid))
+	if (!user_in_room(rid, ctx->uid))
 		goto ret;
 
 	sprintf(buf,
 	        "SELECT uid FROM room_users WHERE id=%lu AND uid<>%lu AND pv>=%u",
 	        rid, ctx->uid, version);
-	db_exec(ctx->db_w, pkt, buf, broadcast_to_room_cb);
+	db_exec(db_w, pkt, buf, broadcast_to_room_cb);
 
 ret:
 	if (!pkt->refcnt) free_packet(pkt);
@@ -463,13 +464,13 @@ void broadcast_at_or_below(struct pt_context *ctx, unsigned long rid,
 {
 	char buf[128];
 
-	if (!user_in_room(ctx->db_w, rid, ctx->uid))
+	if (!user_in_room(rid, ctx->uid))
 		goto ret;
 
 	sprintf(buf,
 	        "SELECT uid FROM room_users WHERE id=%lu AND uid<>%lu AND pv<%u",
 	        rid, ctx->uid, version);
-	db_exec(ctx->db_w, pkt, buf, broadcast_to_room_cb);
+	db_exec(db_w, pkt, buf, broadcast_to_room_cb);
 
 ret:
 	if (!pkt->refcnt) free_packet(pkt);
@@ -484,13 +485,13 @@ void broadcast_to_unignored(struct pt_context *ctx, unsigned long rid,
 {
 	char buf[128];
 
-	if (!user_in_room(ctx->db_w, rid, ctx->uid))
+	if (!user_in_room(rid, ctx->uid))
 		goto ret;
 
 	sprintf(buf, "SELECT uid FROM room_users WHERE id=%lu AND uid<>%lu "
 	             "EXCEPT SELECT uid FROM room_ignore WHERE id=%lu AND "
 	             "target=%lu", rid, ctx->uid, rid, ctx->uid);
-	db_exec(ctx->db_w, pkt, buf, broadcast_to_room_cb);
+	db_exec(db_w, pkt, buf, broadcast_to_room_cb);
 
 ret:
 	if (!pkt->refcnt) free_packet(pkt);
@@ -503,7 +504,7 @@ int room_user_ignores_me(struct pt_context *ctx, unsigned long rid, unsigned lon
 {
 	if (!ignores_me) {
 		reddot_text_query = db_prepare(
-			ctx->db_w,
+			db_w,
 			"SELECT COUNT(*) FROM room_ignore WHERE id=? AND uid=? AND target=?"
 		);
 	}
@@ -529,7 +530,7 @@ void send_room_message(struct pt_context *ctx, struct pt_context *target,
 
 	if (!reddot_text_query) {
 		reddot_text_query = db_prepare(
-			ctx->db_w,
+			db_w,
 			"SELECT text FROM rooms WHERE id=?"
 		);
 	}
@@ -544,7 +545,7 @@ void send_room_message(struct pt_context *ctx, struct pt_context *target,
 	 * If text is reddotted at the room level, ignore any messages from
 	 * non-admins
 	 */
-	admin = from && (from == UID_PALTALK_NOTIFIER || user_is_room_admin(ctx->db_w, rid, from));
+	admin = from && (from == UID_PALTALK_NOTIFIER || user_is_room_admin(rid, from));
 	if (from && !admin && !db_get_int(reddot_text_query))
 		return;
 
@@ -572,7 +573,7 @@ void send_room_message(struct pt_context *ctx, struct pt_context *target,
 /**
  * Get "My Room" info
  */
-char *get_my_room_info(void *db_w, unsigned long uid)
+char *get_my_room_info(unsigned long uid)
 {
 	char *sql, *s = NULL;
 
@@ -600,7 +601,7 @@ char *get_my_room_info(void *db_w, unsigned long uid)
 /**
  * Get the first room id matching \a name
  */
-unsigned long name_to_room(void *db_w, const char *name)
+unsigned long name_to_room(const char *name)
 {
 	unsigned i;
 
@@ -623,7 +624,7 @@ unsigned long name_to_room(void *db_w, const char *name)
 /**
  * Search for a room by partial match on the room name
  */
-char *search_rooms(void *db_w, unsigned protocol_version, const char *partial)
+char *search_rooms(unsigned protocol_version, const char *partial)
 {
 	char *sql = NULL, *s = NULL;
 	void *sr;
@@ -690,7 +691,7 @@ void room_invite(struct pt_context *ctx, unsigned long rid, unsigned long uid)
 	sprintf(buf, "%lu", uid);
 	if (!make_invite) {
 		make_invite = db_prepare(
-			ctx->db_w,
+			db_w,
 			"SELECT ? AS uid, ? AS nickname, COALESCE(?, CHAR(0x20)) AS first,"
 			"COALESCE(?, CHAR(0x20)) AS last, id AS group_id, "
 			"nm AS group_name, type, l AS lock FROM rooms WHERE id=?"
@@ -703,7 +704,7 @@ void room_invite(struct pt_context *ctx, unsigned long rid, unsigned long uid)
 	db_reset_prepared(make_invite);
 	db_bind(make_invite, "ittti", ctx->uid, ctx->user.nickname, ctx->user.first, ctx->user.last, rid);
 	sql = db_get_prepared_sql(make_invite);
-	db_exec(ctx->db_w, &s, sql, db_row_to_record);
+	db_exec(db_w, &s, sql, db_row_to_record);
 	db_free(sql);
 
 	if ((sql = strstr(s, "lock=0"))) {
@@ -726,7 +727,7 @@ void create_room(struct pt_context *ctx, unsigned char type,
 
 	if (!make_room) {
 		make_room = db_prepare(
-			ctx->db_w,
+			db_w,
 			"INSERT INTO rooms(type, catg, subcatg, r, v, p, mike, nm, l, "
 			"password, owner, premium, c, created) VALUES(?, ?, ?, ?, ?, "
 			"?, ?, ?, ?, ?, ?, ?, ?, datetime('now','subsec')) "
@@ -768,10 +769,10 @@ void create_room(struct pt_context *ctx, unsigned char type,
 /**
  * Get the first room id owned by the given user
  */
-unsigned long owners_room(void *db_r, unsigned long uid) {
+unsigned long owners_room(unsigned long uid) {
 	if (!get_owners_room) {
 		get_owners_room = db_prepare(
-			db_r,
+			db_w,
 			"SELECT id FROM rooms WHERE p=0 AND owner=?"
 		);
 	}
@@ -802,13 +803,13 @@ static int join_room_cb(void *userdata, int cols, char *val[], char *col[])
 
 	if (!join_room_users) {
 		join_room_users = db_prepare(
-			ctx->db_w,
+			db_w,
 			"INSERT INTO room_users(id, uid, mic, invis, admin, host, pv) "
 			"VALUES(?,?,(SELECT mike FROM rooms WHERE id=?),?,?,?,?)"
 		);
 	}
 
-	if (!join_room_users || cols != 11 || !val[7] || !*val[7]) {
+	if (!join_room_users || cols != 12 || !val[7] || !*val[7]) {
 		send_return_code(ctx, 1, server_error, SERVER_ERROR_LEN);
 		return -1;
 	}
@@ -859,7 +860,7 @@ static int join_room_cb(void *userdata, int cols, char *val[], char *col[])
 
 	db_reset_prepared(join_room_users);
 	db_bind(join_room_users, "iiiiiii", rid, ctx->uid, rid, buf[11],
-	        admin, user_is_owner(ctx->db_w, rid, ctx->uid),
+	        admin, user_is_owner(rid, ctx->uid),
 	        ctx->protocol_version);
 	db_do_prepared(join_room_users);
 
@@ -872,6 +873,8 @@ static int join_room_cb(void *userdata, int cols, char *val[], char *col[])
 	if (val[6] && *val[6])
 		send_room_message(ctx, ctx, rid, 0, strlen(val[6]), val[6]);
 
+	if (type == ROOM_TYPE_PRIVATE_VOICE || type == ROOM_TYPE_VOICE)
+		rtpctl(RTP_JOIN, rid, ctx->uid, val[11], strlen(val[11]));
 	return 0;
 }
 
@@ -885,7 +888,7 @@ void join(struct pt_context *ctx, unsigned long rid, unsigned long code,
 
 	if (!banned_query) {
 		banned_query = db_prepare(
-			ctx->db_w,
+			db_w,
 			"SELECT COUNT(*) FROM room_bans WHERE id=? AND uid=?"
 		);
 	}
@@ -895,19 +898,21 @@ void join(struct pt_context *ctx, unsigned long rid, unsigned long code,
 	 */
 	if (!join_query) {
 		join_query = db_prepare(
-			ctx->db_w,
+			db_w,
 			"SELECT id, type, catg, COALESCE(subcatg, 0) AS subcatg, "
 			"l, owner, intro, "
 			"replace(format('%c%s\\nfield2\\nfield3\\nY\\nsize=%u\\n"
 			"premium=%u\\ncodec=%s\\nqual=%u\\nchannels=%u\\nowner=%s\\n"
 			"', r, nm, size, premium, codec, qual, channels, "
 			"(SELECT nickname FROM users WHERE uid=owner)), '\\n', "
-			"CHAR(10)) AS data, (code == ?), (password IS NULL OR password == ?), ? "
+			"CHAR(10)) AS data, (code == ?), "
+			"(password IS NULL OR password == ?), ?, "
+			"CONCAT(channels & 0xf, CHAR(10), codec) "
 			"FROM rooms WHERE id=?"
 		);
 	}
 
-	if (user_in_room(ctx->db_w, rid, ctx->uid) || !banned_query || !join_query || !rid)
+	if (user_in_room(rid, ctx->uid) || !banned_query || !join_query || !rid)
 		return;
 
 	db_reset_prepared(banned_query);
@@ -920,7 +925,7 @@ void join(struct pt_context *ctx, unsigned long rid, unsigned long code,
 	db_reset_prepared(join_query);
 	db_bind(join_query, "itii", code, passwd, !!invis, rid);
 	s = db_get_prepared_sql(join_query);
-	if (db_exec(ctx->db_w, ctx, s, join_room_cb)) {
+	if (db_exec(db_w, ctx, s, join_room_cb)) {
 		db_free(s);
 		return;
 	}
@@ -944,12 +949,12 @@ void join(struct pt_context *ctx, unsigned long rid, unsigned long code,
 	buf[7]  = ctx->server_ip & 0xff;
 	buf[8]  = 0;
 	buf[9]  = 1;
-	buf[10] = (voice_tx_port >> 8) & 0xff;
-	buf[11] = voice_tx_port & 0xff;
+	buf[10] = 0; /* This entry (udp tx port) isn't used by default. */
+	buf[11] = 0;
 	buf[12] = 0;
 	buf[13] = 0;
-	buf[14] = (voice_rx_port >> 8) & 0xff;
-	buf[15] = voice_rx_port & 0xff;
+	buf[14] = (voice_port >> 8) & 0xff;
+	buf[15] = voice_port & 0xff;
 	send_packet(ctx, new_packet(PACKET_ROOM_VOICE_CONN_INFO, 16, buf, PACKET_F_COPY));
 }
 
@@ -962,21 +967,21 @@ void part(struct pt_context *ctx, unsigned long rid)
 
 	if (!depart[0]) {
 		depart[0] = db_prepare(
-			ctx->db_w,
+			db_w,
 			"DELETE FROM room_users WHERE id=? AND uid=?"
 		);
 	}
 
 	if (!depart[1]) {
 		depart[1] = db_prepare(
-			ctx->db_w,
+			db_w,
 			"DELETE FROM room_ignore WHERE id=? AND uid=?"
 		);
 	}
 
 	if (!depart[2]) { /* Clean up temp rooms as folks part */
 		depart[2] = db_prepare(
-			ctx->db_w,
+			db_w,
 			"DELETE FROM rooms WHERE id=? AND code=0 AND "
 			"owner IS NOT NULL AND (SELECT COUNT(*) FROM "
 			"room_users WHERE id=?)=0"
@@ -986,7 +991,7 @@ void part(struct pt_context *ctx, unsigned long rid)
 	if (!depart[0] || !depart[1] || !depart[2])
 		return;
 
-	if (user_in_room(ctx->db_w, rid, ctx->uid)) {
+	if (user_in_room(rid, ctx->uid)) {
 		buf[0] = (rid >> 24) & 0xff;
 		buf[1] = (rid >> 16) & 0xff;
 		buf[2] = (rid >> 8)  & 0xff;
@@ -996,6 +1001,7 @@ void part(struct pt_context *ctx, unsigned long rid)
 		buf[6] = (ctx->uid >> 8)  & 0xff;
 		buf[7] = ctx->uid & 0xff;
 		broadcast_to_room(ctx, rid, new_packet(PACKET_ROOM_USER_LEFT, 8, buf, PACKET_F_COPY));
+		rtpctl(RTP_PART, rid, ctx->uid, NULL, 0);
 	}
 
 	db_reset_prepared(depart[0]);
@@ -1033,7 +1039,7 @@ void part_all(struct pt_context *ctx)
 		return;
 
 	sprintf(buf, "SELECT id FROM room_users WHERE uid=%lu", ctx->uid);
-	db_exec(ctx->db_w, ctx, buf, part_all_cb);
+	db_exec(db_w, ctx, buf, part_all_cb);
 }
 
 /**
@@ -1046,7 +1052,7 @@ void close_room(struct pt_context *ctx, unsigned long rid, const char *msg)
 
 	if (!do_close_room) {
 		do_close_room = db_prepare(
-			ctx->db_w,
+			db_w,
 			"DELETE FROM room_users WHERE id=?"
 		);
 	}
@@ -1054,8 +1060,8 @@ void close_room(struct pt_context *ctx, unsigned long rid, const char *msg)
 	if (!do_close_room)
 		return;
 
-	if (!(user_is_owner(ctx->db_w, rid, ctx->uid)      ||
-	      user_is_room_admin(ctx->db_w, rid, ctx->uid) ||
+	if (!(user_is_owner(rid, ctx->uid)      ||
+	      user_is_room_admin(rid, ctx->uid) ||
 	      ctx->user.admin))
 		return;
 
@@ -1073,6 +1079,7 @@ void close_room(struct pt_context *ctx, unsigned long rid, const char *msg)
 	buf[7] = ctx->uid & 0xff;
 	if (msg) memcpy(buf + 8, msg, size - 8);
 	broadcast_to_room(ctx, rid, new_packet(PACKET_ROOM_CLOSED, size, buf, 0));
+	rtpctl(RTP_CLOSED, rid, 0, NULL, 0);
 
 	db_reset_prepared(do_close_room);
 	db_bind(do_close_room, "i", rid);
@@ -1089,12 +1096,12 @@ void mute_room(struct pt_context *ctx, unsigned long rid, unsigned on)
 
 	if (!set_away) {
 		set_away = db_prepare(
-			ctx->db_w,
+			db_w,
 			"UPDATE room_users SET away=? WHERE id=? AND uid=?"
 		);
 	}
 
-	if (!set_away || !user_in_room(ctx->db_w, rid, ctx->uid))
+	if (!set_away || !user_in_room(rid, ctx->uid))
 		return;
 
 	db_reset_prepared(set_away);
@@ -1114,6 +1121,7 @@ void mute_room(struct pt_context *ctx, unsigned long rid, unsigned on)
 
 	pkt = new_packet(PACKET_ROOM_USER_MUTE, 10, buf, PACKET_F_COPY);
 	broadcast_to_room(ctx, rid, pkt);
+	rtpctl(!!on ? RTP_USER_UNMUTE : RTP_USER_MUTE, rid, ctx->uid, NULL, 0);
 }
 
 /**
@@ -1126,14 +1134,14 @@ void ignore(struct pt_context *ctx, unsigned long rid,
 
 	if (!room_ignore[0]) {
 		room_ignore[0] = db_prepare(
-			ctx->db_w,
+			db_w,
 			"DELETE FROM room_ignore WHERE id=? AND uid=? AND target=?"
 		);
 	}
 
 	if (!room_ignore[1]) {
 		room_ignore[1] = db_prepare(
-			ctx->db_w,
+			db_w,
 			"INSERT INTO room_ignore(id, uid, target) VALUES(?, ?, ?) "
 			"ON CONFLICT DO NOTHING"
 		);
@@ -1148,10 +1156,10 @@ void ignore(struct pt_context *ctx, unsigned long rid,
 		goto done;
 	}
 
-	if (!user_in_room(ctx->db_w, rid, ctx->uid) || !user_in_room(ctx->db_w, rid, target))
+	if (!user_in_room(rid, ctx->uid) || !user_in_room(rid, target))
 		return;
 
-	if (user_is_room_admin(ctx->db_w, rid, target)) {
+	if (user_is_room_admin(rid, target)) {
 		if (on) send_return_code(ctx, 1, cant_ignore_admins, CANT_IGNORE_ADMINS_LEN);
 		on = 0;
 	}
@@ -1204,12 +1212,12 @@ void reddot_user(struct pt_context *ctx, unsigned long rid,
 	char buf[8];
 	struct pt_packet *pkt;
 
-	if (!user_is_room_admin(ctx->db_w, rid, ctx->uid))
+	if (!user_is_room_admin(rid, ctx->uid))
 		return;
 
 	if (!set_mic) {
 		set_away = db_prepare(
-			ctx->db_w,
+			db_w,
 			"UPDATE room_users SET mic=? WHERE id=? AND uid=?"
 		);
 	}
@@ -1236,6 +1244,7 @@ void reddot_user(struct pt_context *ctx, unsigned long rid,
 
 	send_packet(ctx, pkt);
 	broadcast_to_room(ctx, rid, pkt);
+	rtpctl(on ? RTP_RED : RTP_UNRED, rid, ctx->uid, NULL, 0);
 }
 
 /**
@@ -1248,12 +1257,12 @@ void set_all_mics(struct pt_context *ctx, unsigned long rid, int on)
 
 	if (!all_mics) {
 		all_mics = db_prepare(
-			ctx->db_w,
+			db_w,
 			"UPDATE room_users SET mic=? WHERE id=?"
 		);
 	}
 
-	if (!all_mics || !user_is_room_admin(ctx->db_w, rid, ctx->uid))
+	if (!all_mics || !user_is_room_admin(rid, ctx->uid))
 		return;
 
 	buf[0] = (rid >> 24) & 0xff;
@@ -1274,6 +1283,7 @@ void set_all_mics(struct pt_context *ctx, unsigned long rid, int on)
 	pkt = new_packet(PACKET_ROOM_SET_MIC, 10, buf, PACKET_F_COPY);
 	send_packet(ctx, pkt);
 	broadcast_to_room(ctx, rid, pkt);
+	rtpctl(on ? RTP_RED : RTP_UNRED, rid, 0, NULL, 0);
 }
 
 /**
@@ -1286,12 +1296,12 @@ void raise_hand(struct pt_context *ctx, unsigned long rid, int on)
 
 	if (!set_hand) {
 		set_hand = db_prepare(
-			ctx->db_w,
+			db_w,
 			"UPDATE room_users SET req=? WHERE id=? AND uid=?"
 		);
 	}
 
-	if (!set_hand || !user_in_room(ctx->db_w, rid, ctx->uid))
+	if (!set_hand || !user_in_room(rid, ctx->uid))
 		return;
 
 	buf[0] = (rid >> 24) & 0xff;
@@ -1330,12 +1340,12 @@ void lower_all_hands(struct pt_context *ctx, unsigned long rid)
 
 	if (!all_hands) {
 		all_hands = db_prepare(
-			ctx->db_w,
+			db_w,
 			"UPDATE room_users SET req=? WHERE id=?"
 		);
 	}
 
-	if (!all_hands || !user_is_room_admin(ctx->db_w, rid, ctx->uid))
+	if (!all_hands || !user_is_room_admin(rid, ctx->uid))
 		return;
 
 	buf[0] = (rid >> 24) & 0xff;
@@ -1359,7 +1369,7 @@ void lower_all_hands(struct pt_context *ctx, unsigned long rid)
 /**
  * Get the admin console info for a room
  */
-char *get_admin_info(struct pt_context *ctx, unsigned long rid)
+char *get_admin_info(unsigned long rid)
 {
 	char buf[256];
 	char *s = NULL;
@@ -1371,7 +1381,7 @@ char *get_admin_info(struct pt_context *ctx, unsigned long rid)
 		"WHERE id=%ld), char(10)) AS bounce FROM rooms WHERE id=%ld",
 		 rid, rid
 	);
-	if (db_exec(ctx->db_w, &s, buf, db_row_to_record) || !s)
+	if (db_exec(db_w, &s, buf, db_row_to_record) || !s)
 		return s;
 
 	sprintf(
@@ -1380,7 +1390,7 @@ char *get_admin_info(struct pt_context *ctx, unsigned long rid)
 		"WHERE id=%ld), char(10)) AS ban",
 		 rid
 	);
-	db_exec(ctx->db_w, &s, buf, db_row_to_record);
+	db_exec(db_w, &s, buf, db_row_to_record);
 	return s;
 }
 
@@ -1430,12 +1440,12 @@ void room_topic(struct pt_context *ctx, unsigned long rid, const char *topic)
 
 	if (!set_topic) {
 		set_topic = db_prepare(
-			ctx->db_w,
+			db_w,
 			"UPDATE rooms SET topic=?,topic_setter=? WHERE id=?"
 		);
 	}
 
-	if (!set_topic || !user_is_room_admin(ctx->db_w, rid, ctx->uid))
+	if (!set_topic || !user_is_room_admin(rid, ctx->uid))
 		return;
 
 	if (!topic) topic = empty_str;
@@ -1502,12 +1512,12 @@ void room_banner_url(struct pt_context *ctx, unsigned long rid,
 
 	if (!set_banner_url) {
 		set_banner_url = db_prepare(
-			ctx->db_w,
+			db_w,
 			"UPDATE rooms SET banner_url=? WHERE id=?"
 		);
 	}
 
-	if (!set_banner_url || !user_is_room_admin(ctx->db_w, rid, ctx->uid))
+	if (!set_banner_url || !user_is_room_admin(rid, ctx->uid))
 		return;
 
 	if (!url) url = empty_str;
@@ -1540,7 +1550,7 @@ void room_admin(struct pt_context *ctx, unsigned long rid,
 
 	if (!set_admin) {
 		set_admin = db_prepare(
-			ctx->db_w,
+			db_w,
 			"UPDATE room_users SET admin=? WHERE id=? AND uid=?"
 		);
 	}
@@ -1551,12 +1561,12 @@ void room_admin(struct pt_context *ctx, unsigned long rid,
 
 	/* Can't de-op owner or global admins, can de-op others, can de-op self */
 	if (uid != ctx->uid && (
-	    !user_in_room(ctx->db_w, rid, uid) ||
-	    target->user.admin                 ||
-	    user_is_owner(ctx->db_w, rid, uid)))
+	    !user_in_room(rid, uid) ||
+	    target->user.admin      ||
+	    user_is_owner(rid, uid)))
 		return;
 
-	if (!(user_is_room_admin(ctx->db_w, rid, uid) ^ !!on))
+	if (!(user_is_room_admin(rid, uid) ^ !!on))
 		return;
 
 	/* Let fellow admins know someone's been given special powers */
@@ -1630,20 +1640,20 @@ void ban_user(struct pt_context *ctx, unsigned long rid, unsigned long uid)
 
 	if (!do_ban) {
 		do_ban = db_prepare(
-			ctx->db_w,
+			db_w,
 			"INSERT INTO room_bans(id,uid,banner,ts) VALUES("
 			"?,?,?,datetime('now','subsec')) ON CONFLICT DO NOTHING"
 		);
 	}
 
-	if (!do_ban || !user_is_room_admin(ctx->db_w, rid, ctx->uid))
+	if (!do_ban || !user_is_room_admin(rid, ctx->uid))
 		return;
 
 	db_reset_prepared(do_ban);
 	db_bind(do_ban, "iii", rid, uid, ctx->uid);
 	db_do_prepared(do_ban);
 
-	if (!user_in_room(ctx->db_w, rid, ctx->uid))
+	if (!user_in_room(rid, ctx->uid))
 		return;
 
 	sprintf(buf, "%ld", uid);
@@ -1669,12 +1679,12 @@ void unban_user(struct pt_context *ctx, unsigned long rid, unsigned long uid)
 {
 	if (!do_unban) {
 		do_unban = db_prepare(
-			ctx->db_w,
+			db_w,
 			"DELETE FROM room_bans WHERE id=? AND uid=?"
 		);
 	}
 
-	if (!do_unban || !user_is_room_admin(ctx->db_w, rid, ctx->uid))
+	if (!do_unban || !user_is_room_admin(rid, ctx->uid))
 		return;
 
 	db_reset_prepared(do_unban);
@@ -1693,20 +1703,20 @@ void bounce_user(struct pt_context *ctx, unsigned long rid,
 
 	if (!do_bounce) {
 		do_bounce = db_prepare(
-			ctx->db_w,
+			db_w,
 			"INSERT INTO room_bounces(id,uid,bouncer,reason,ts) VALUES("
 			"?,?,?,?,datetime('now','subsec')) ON CONFLICT DO NOTHING"
 		);
 	}
 
-	if (!do_bounce || !user_is_room_admin(ctx->db_w, rid, ctx->uid))
+	if (!do_bounce || !user_is_room_admin(rid, ctx->uid))
 		return;
 
 	db_reset_prepared(do_bounce);
 	db_bind(do_bounce, "iiit", 0, rid, uid, ctx->uid, reason ? reason : empty_str);
 	db_do_prepared(do_bounce);
 
-	if (!user_in_room(ctx->db_w, rid, ctx->uid))
+	if (!user_in_room(rid, ctx->uid))
 		return;
 
 	sprintf(buf, "%ld", uid);
@@ -1732,12 +1742,12 @@ void unbounce_user(struct pt_context *ctx, unsigned long rid, unsigned long uid)
 {
 	if (!do_unbounce) {
 		do_unbounce = db_prepare(
-			ctx->db_w,
+			db_w,
 			"DELETE FROM room_bounces WHERE id=? AND uid=?"
 		);
 	}
 
-	if (!do_unbounce || !user_is_room_admin(ctx->db_w, rid, ctx->uid))
+	if (!do_unbounce || !user_is_room_admin(rid, ctx->uid))
 		return;
 
 	db_reset_prepared(do_unbounce);
@@ -1752,12 +1762,12 @@ void new_user_mic(struct pt_context *ctx, unsigned long rid, int on)
 {
 	if (!do_mic) {
 		do_mic = db_prepare(
-			ctx->db_w,
+			db_w,
 			"UPDATE rooms SET mike=? WHERE id=?"
 		);
 	}
 
-	if (!do_mic || !user_is_room_admin(ctx->db_w, rid, ctx->uid))
+	if (!do_mic || !user_is_room_admin(rid, ctx->uid))
 		return;
 
 	db_reset_prepared(do_mic);
@@ -1772,12 +1782,12 @@ void reddot_text(struct pt_context *ctx, unsigned long rid, int on)
 {
 	if (!do_text) {
 		do_text = db_prepare(
-			ctx->db_w,
+			db_w,
 			"UPDATE rooms SET text=? WHERE id=?"
 		);
 	}
 
-	if (!do_text || !user_is_room_admin(ctx->db_w, rid, ctx->uid))
+	if (!do_text || !user_is_room_admin(rid, ctx->uid))
 		return;
 
 	db_reset_prepared(do_text);
@@ -1792,12 +1802,12 @@ void reddot_video(struct pt_context *ctx, unsigned long rid, int on)
 {
 	if (!do_video) {
 		do_video = db_prepare(
-			ctx->db_w,
+			db_w,
 			"UPDATE rooms SET video=? WHERE id=?"
 		);
 	}
 
-	if (!do_video || !user_is_room_admin(ctx->db_w, rid, ctx->uid))
+	if (!do_video || !user_is_room_admin(rid, ctx->uid))
 		return;
 
 	db_reset_prepared(do_video);
@@ -1819,12 +1829,12 @@ void whisper(struct pt_context *ctx, unsigned long rid,
 		return;
 
 	target_uid = lookup_uid(ctx->db_r, target);
-	if (UID_IS_ERROR(target_uid) || !user_in_room(ctx->db_w, rid, target_uid))
+	if (UID_IS_ERROR(target_uid) || !user_in_room(rid, target_uid))
 		return;
 
 	/* TODO: Check for anonymous room and bail */
-	if (user_is_invisible(ctx->db_w, rid, target_uid) ||
-	    user_is_invisible(ctx->db_w, rid, ctx->uid))
+	if (user_is_invisible(rid, target_uid) ||
+	    user_is_invisible(rid, ctx->uid))
 		return;
 
 	if (!(buf = malloc(32)))
@@ -1875,12 +1885,12 @@ static void admin_code(struct pt_context *ctx, unsigned long rid, unsigned code)
 {
 	if (!set_code) {
 		set_code = db_prepare(
-			ctx->db_w,
+			db_w,
 			"UPDATE rooms SET code=? WHERE id=?"
 		);
 	}
 
-	if (!ctx || !rid || !user_is_owner(ctx->db_w, rid, ctx->uid))
+	if (!ctx || !rid || !user_is_owner(rid, ctx->uid))
 		return;
 
 	if (!code || code > 9999) {
@@ -1990,7 +2000,7 @@ int room_command(struct pt_context *ctx, unsigned long rid, const char *buf)
 	}
 
 	if (!ret) {
-		msg = room_cmds[user_is_room_admin(ctx, rid, ctx->uid)];
+		msg = room_cmds[user_is_room_admin(rid, ctx->uid)];
 		send_room_message(ctx, ctx, rid, 0, strlen(msg), msg);
 	}
 

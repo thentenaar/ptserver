@@ -52,7 +52,6 @@ struct pt_context {
 	int disconnect;
 	struct sockaddr_in addr;
 	void *db_r;
-	void *db_w;
 	struct user user;
 
 	time_t time;

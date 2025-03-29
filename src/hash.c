@@ -14,8 +14,7 @@
 #include <errno.h>
 
 #include "hash.h"
-
-#define max(X,Y) ((X) > (Y) ? (X) : (Y))
+#include "macros.h"
 
 /**
  * Default table size
@@ -146,8 +145,14 @@ static unsigned int insert(struct ht *ht, const char *key,
 	i = h & ht->mask;
 
 	while (ht->e[i].h & ~HT_TOMBSTONE) {
-		if (ht->e[i].h == h && !strcmp(ht->e[i].k, key))
-			goto ret;
+		if (ht->e[i].h == h && !strcmp(ht->e[i].k, key)) {
+			if (!(ht->flags & (HT_STATIC_KEYS | HT_RESIZE)))
+				free(ht->e[i].k);
+			if (ht->e[i].t == HT_STR)
+				free(ht->e[i].v.nc);
+			break;
+		}
+
 		++j;
 		i = (i + (q += ht->gap)) & ht->mask;
 	}
@@ -411,13 +416,13 @@ int ht_rm(struct ht *ht, const char *key)
 		return (errno == ENOENT) ? 0 : -1;
 
 	--ht->size;
-	ht->e[i].k    = NULL;
 	ht->e[i].v.nc = NULL;
 	ht->e[i].h   |= HT_TOMBSTONE;
 
 	if (ht->e[i].t == HT_STR) free(ht->e[i].v.nc);
 	if (!(ht->flags & HT_STATIC_KEYS))
 		free(ht->e[i].k);
+	ht->e[i].k = NULL;
 
 	/* If our load factor drops below 25%, resize the table */
 	if (ht->size < (ht->capacity >> 2))
@@ -439,7 +444,7 @@ ret:
 int ht_set(struct ht *ht, const char *key, unsigned char type,
            const void *in)
 {
-	if (!ht || !in || !key || !*key || type > HT_MAX)
+	if (!ht || !key || !*key || type > HT_MAX)
 		return EINVAL;
 
 	/**

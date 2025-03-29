@@ -11,6 +11,9 @@
 #include "server_handler.h"
 #include "user.h"
 
+/* server.c */
+extern void *db_w;
+
 #define REGISTRATION_FAILED_LEN 20
 static const char * const registration_failed = "Registration failed!";
 
@@ -137,7 +140,7 @@ void registration_flow(struct pt_context *ctx)
 			break;
 		}
 
-		if (!ctx->user.nickname || register_user(ctx->db_w, &ctx->user)) {
+		if (!ctx->user.nickname || register_user(db_w, &ctx->user)) {
 			send_return_code(ctx, 2, registration_failed, REGISTRATION_FAILED_LEN);
 			break;
 		}
@@ -148,7 +151,7 @@ void registration_flow(struct pt_context *ctx)
 		}
 
 		ctx->uid = ctx->user.uid;
-		user_set_password(ctx->db_w, ctx->uid, dec);
+		user_set_password(db_w, ctx->uid, dec);
 		free(dec);
 
 		/* PT 5 will reply with the password hint */
@@ -248,15 +251,15 @@ void registration_flow(struct pt_context *ctx)
 			break;
 		}
 
-		if (!ctx->user.nickname || !ctx->user.password || register_user(ctx->db_w, &ctx->user)) {
+		if (!ctx->user.nickname || !ctx->user.password || register_user(db_w, &ctx->user)) {
 			free(q);
 			send_packet(ctx, new_packet(PACKET_REGISTRATION_FAILED, 0, NULL, 0));
 			break;
 		}
 
 		/* Reply with the uid */
-		user_set_password(ctx->db_w, ctx->user.uid, ctx->user.password);
-		user_set_secret_question(ctx->db_w, ctx->user.uid, id, q);
+		user_set_password(db_w, ctx->user.uid, ctx->user.password);
+		user_set_secret_question(db_w, ctx->user.uid, id, q);
 		buf[0] = (ctx->user.uid >> 24) & 0xff;
 		buf[1] = (ctx->user.uid >> 16) & 0xff;
 		buf[2] = (ctx->user.uid >> 8)  & 0xff;

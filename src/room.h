@@ -11,6 +11,7 @@
 #include <stddef.h>
 
 struct pt_context;
+struct pt_packet;
 
 /**
  * Get the room counts by category
@@ -36,22 +37,22 @@ char *rooms_for_subcategory(void *db_r, unsigned long catid, unsigned long scid)
 /**
  * Non-zero if the given user is in the given room
  */
-int user_in_room(void *db_w, unsigned long rid, unsigned long uid);
+int user_in_room(unsigned long rid, unsigned long uid);
 
 /**
  * Non-zero if the given user is invisble in the given room
  */
-int user_is_invisible(void *db_w, unsigned long rid, unsigned long uid);
+int user_is_invisible(unsigned long rid, unsigned long uid);
 
 /**
  * Non-zero if the given user is a room admin and present in the room
  */
-int user_is_room_admin(void *db_w, unsigned long rid, unsigned long uid);
+int user_is_room_admin(unsigned long rid, unsigned long uid);
 
 /**
  * Non-zero if the given user is the room owner
  */
-int user_is_owner(void *db_w, unsigned long rid, unsigned long uid);
+int user_is_owner(unsigned long rid, unsigned long uid);
 
 /**
  * Broadcast a packet to an entire room
@@ -107,17 +108,17 @@ void send_room_message(struct pt_context *ctx, struct pt_context *target,
 /**
  * Get "My Room" info
  */
-char *get_my_room_info(void *db_w, unsigned long uid);
+char *get_my_room_info(unsigned long uid);
 
 /**
  * Get the first room id matching \a name
  */
-unsigned long name_to_room(void *db_w, const char *name);
+unsigned long name_to_room(const char *name);
 
 /**
  * Search for a room by partial match on the room name
  */
-char *search_rooms(void *db_w, unsigned protocol_version, const char *partial);
+char *search_rooms(unsigned protocol_version, const char *partial);
 
 /**
  * Send a room invite to a buddy
@@ -134,7 +135,7 @@ void create_room(struct pt_context *ctx, unsigned char type,
 /**
  * Get the first room id owned by the given user
  */
-unsigned long owners_room(void *db_r, unsigned long uid);
+unsigned long owners_room(unsigned long uid);
 
 /**
  * Join a room
@@ -219,7 +220,7 @@ void room_admin(struct pt_context *ctx, unsigned long rid,
 /**
  * Get the admin console info for a room
  */
-char *get_admin_info(struct pt_context *ctx, unsigned long rid);
+char *get_admin_info(unsigned long rid);
 
 /**
  * Ban a user from a room

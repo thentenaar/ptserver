@@ -24,6 +24,7 @@ static const char * const multi_login  = "You've logged in from another client, 
 static const char * const bad_password = "The password you entered is incorrect.";
 
 /* from server.c */
+extern void *db_w;
 extern struct ht *uid_to_context;
 
 void login_transition(struct pt_context *ctx)
@@ -291,7 +292,7 @@ void login_flow(struct pt_context *ctx)
 		kick(ht_get_ptr_nc(uid_to_context, ctx->uid_str), multi_login, MULTI_LOGIN_LEN);
 		ht_set(uid_to_context, ctx->uid_str, HT_PTR, ctx);
 		send_packet(ctx, new_packet(PACKET_LOGIN_SUCCESS, 0, NULL, 0));
-		user_logged_in(ctx->db_w, ctx->uid);
+		user_logged_in(db_w, ctx->uid);
 		break;
 	case PACKET_UID_FONTDEPTH_ETC:
 		/**

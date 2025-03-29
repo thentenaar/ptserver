@@ -6,10 +6,11 @@
  * See the LICENSE file for details.
  */
 
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stddef.h>
+#include <unistd.h>
 #include <errno.h>
 #include <getopt.h>
 #include <limits.h>
@@ -20,6 +21,7 @@
 #include <netinet/in.h>
 
 #include "net.h"
+#include "service.h"
 #include "logging.h"
 #include "database.h"
 #include "packet.h"
@@ -29,26 +31,42 @@
 #include "buddylist.h"
 #include "protocol.h"
 
-unsigned short voice_rx_port = 8002;
-unsigned short voice_tx_port = 8003;
-static unsigned timeout      = 120; /**< seconds */
-static const char *db_path   = "ptserver.db";
+/* service handles */
+unsigned long rtp_service;
 
-static volatile int force_exit;
-static void *db_w;
+unsigned short voice_port  = 5002;
+struct sockaddr_in server_addr;
+
+static unsigned timeout    = 120; /**< seconds */
+static const char *db_path = "ptserver.db";
+
+volatile int got_sig;
 struct ht *uid_to_context; /**< uid -> context for logged in users */
+void *db_w;
+
+extern struct service_ops rtp_service_ops;
 
 static void sighandler(int sig)
 {
 	(void)sig;
-	force_exit = 1;
+	got_sig = 1;
 }
 
-static void server_init(void *ctx, unsigned long conn, int fd)
+static void server_init(void *ctx, unsigned long conn, int fd, int fd2)
 {
 	(void)ctx;
 	(void)conn;
+	(void)fd2;
 	fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+}
+
+static unsigned server_poll_events(void *ctx, unsigned long conn, int fd)
+{
+	struct pt_context *c = ctx;
+
+	(void)conn;
+	(void)fd;
+	return NET_POLL_R | (c && c->npkts_out ? NET_POLL_W : 0);
 }
 
 static void server_accept(void *ctx, struct sockaddr *addr,
@@ -70,7 +88,6 @@ static void server_accept(void *ctx, struct sockaddr *addr,
 	net_set_timeout(new_conn, timeout);
 	pt_context_init(c, new_fd);
 	c->db_r = db_open(db_path, 'r');
-	c->db_w = db_w;
 	c->fd   = new_fd;
 	memcpy(&c->addr, addr, addrlen);
 
@@ -140,7 +157,7 @@ static int server_err(void *ctx, unsigned long conn, int fd)
 
 	if (!ctx) {
 		ERROR(("Error on server socket: errno=%d", errno));
-		++force_exit;
+		++got_sig;
 		return 0;
 	}
 
@@ -149,6 +166,7 @@ static int server_err(void *ctx, unsigned long conn, int fd)
 
 static struct netconn_ops server_ops = {
 	server_init,
+	server_poll_events,
 	NULL,
 	server_accept,
 	server_read,
@@ -178,17 +196,18 @@ int main(int argc, char *argv[])
 {
 	int c;
 	unsigned long i;
-	struct sockaddr_in addr;
 
 	signal(SIGINT, sighandler);
+	signal(SIGTERM, sighandler);
+	signal(SIGCHLD, SIG_IGN);
 	signal(SIGPIPE, SIG_IGN);
 	srand(time(NULL));
 
-	force_exit = 0;
-	memset(&addr, 0, sizeof(struct sockaddr_in));
-	addr.sin_family      = AF_INET;
-	addr.sin_port        = htons(5001);
-	addr.sin_addr.s_addr = htonl(INADDR_ANY);
+	got_sig = 0;
+	memset(&server_addr, 0, sizeof(struct sockaddr_in));
+	server_addr.sin_family      = AF_INET;
+	server_addr.sin_port        = htons(5001);
+	server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
 	while ((c = getopt(argc, argv, ":hd:p:m:s:t:")) != -1) {
 		switch (c) {
@@ -203,9 +222,8 @@ int main(int argc, char *argv[])
 				goto err;
 			}
 
-			voice_rx_port = i + 1;
-			voice_tx_port = i + 2;
-			addr.sin_port = htons(i);
+			voice_port    = i + 1;
+			server_addr.sin_port = htons(i);
 			break;
 		case 'm': /* [m]axconn */
 			if ((i = strtoul(optarg, NULL, 10)) > MAX_CONN) {
@@ -216,7 +234,7 @@ int main(int argc, char *argv[])
 			max_conn = (unsigned)i;
 			break;
 		case 's': /* [s]erver ip */
-			if (!inet_pton(AF_INET, optarg, &addr.sin_addr)) {
+			if (!inet_pton(AF_INET, optarg, &server_addr.sin_addr)) {
 				ERROR(("Invalid value for server ip: %s", optarg));
 				goto err;
 			}
@@ -234,19 +252,27 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (net_conn(NULL, &server_ops, (struct sockaddr *)&addr,
-	             sizeof addr, CONN_STREAM | CONN_LISTEN) == ULONG_MAX)
+	/* Start the RTP service */
+	if ((rtp_service = service_start(&rtp_service_ops)) == ULONG_MAX)
 		goto err;
 
-	INFO(("Listening on %s:%u", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port)));
+	if (net_conn(NULL, &server_ops, (struct sockaddr *)&server_addr,
+	             sizeof server_addr, CONN_STREAM | CONN_LISTEN) == ULONG_MAX)
+		goto err;
+
+	INFO(("Listening on %s:%u",
+	      inet_ntoa(server_addr.sin_addr),
+	      ntohs(server_addr.sin_port)));
+
 	db_w           = db_open(db_path, 'w');
 	uid_to_context = ht_alloc(HT_VALUE_DEFAULT, HT_STATIC_KEYS);
 	if (!db_w || !uid_to_context)
 		goto err;
 
-	while (!force_exit) {
-		if (net_poll())
-			force_exit++;
+	while (!got_sig) {
+		if (net_poll(NET_POLL_RW, 1000))
+			got_sig++;
+		service_recv(rtp_service);
 	}
 
 	INFO(("Shutting down..."));
@@ -256,7 +282,7 @@ int main(int argc, char *argv[])
 err:
 	db_close(db_w);
 	ht_free(uid_to_context);
-	return !force_exit;
+	return !got_sig;
 
 usage:
 	printf("Usage: %s [-h] [-d database_file] [-p port] [-m max_connections] "

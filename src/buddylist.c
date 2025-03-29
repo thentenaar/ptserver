@@ -27,6 +27,7 @@ static void *user_is_buddy;
 static void *set_disp_name;
 
 /* from server.c */
+extern void *db_w;
 extern struct ht *uid_to_context;
 
 /**
@@ -132,11 +133,11 @@ static struct pt_packet *mk_statuschange(struct pt_context *ctx, unsigned long u
 			status = STATUS_OFFLINE;
 
 		/* 11.7+ uses JSON for this... :/ */
-		if (ctx->pkt_in.version >= PROTOCOL_VERSION_117)
+		if (ctx->protocol_version >= PROTOCOL_VERSION_117)
 			return mk_statuschange_json(uid, status, crown, msg);
 
 		/* TODO: PT 9.1 needs this extra bit... Not sure what these signify */
-		if (ctx->pkt_in.version >= PROTOCOL_VERSION_91) {
+		if (ctx->protocol_version >= PROTOCOL_VERSION_91) {
 			buf[8]  = 0x00;
 			buf[9]  = 0x5d;
 			len    += 2;
@@ -153,7 +154,7 @@ static struct pt_packet *mk_statuschange(struct pt_context *ctx, unsigned long u
 	buf[6] = (status >> 8) & 0xff;
 	buf[7] = status & 0xff;
 
-	if (status != STATUS_ONLINE && ctx->pkt_in.version >= PROTOCOL_VERSION_82 && msg) {
+	if (status != STATUS_ONLINE && ctx->protocol_version >= PROTOCOL_VERSION_82 && msg) {
 		msglen = min(STATUSMSG_MAX, strlen(msg));
 		memcpy(buf + len, msg, msglen);
 		len += msglen;
@@ -227,7 +228,7 @@ void send_buddy_list(struct pt_context *ctx, int blocked)
 	         blocked ? "nickname" : "display,nickname",
 	         lists[blocked & 1], lists[blocked & 1], lists[blocked & 1],
 	         ctx->uid);
-	if (!db_exec(ctx->db_w, &s, buf, db_row_to_record) && s) {
+	if (!db_exec(db_w, &s, buf, db_row_to_record) && s) {
 		send_packet(ctx, new_packet(
 			blocked ? PACKET_BLOCKED_BUDDIES : PACKET_BUDDY_LIST,
 			strlen(s), s, 0)
@@ -269,7 +270,7 @@ void set_buddy_display(struct pt_context *ctx, unsigned long uid, const char *di
 {
 	if (!set_disp_name) {
 		set_disp_name = db_prepare(
-			ctx->db_w,
+			db_w,
 			"UPDATE buddylist SET display=? WHERE uid=? AND buddy=?"
 		);
 
@@ -289,7 +290,7 @@ void add_buddy(struct pt_context *ctx, unsigned long uid)
 {
 	if (!q_add_buddy) {
 		q_add_buddy = db_prepare(
-			ctx->db_w,
+			db_w,
 			"INSERT INTO buddylist(uid, buddy) VALUES(?, ?) "
 			"ON CONFLICT DO NOTHING"
 		);
@@ -310,7 +311,7 @@ void remove_buddy(struct pt_context *ctx, unsigned long uid)
 {
 	if (!q_remove_buddy) {
 		q_remove_buddy = db_prepare(
-			ctx->db_w,
+			db_w,
 			"DELETE FROM buddylist WHERE uid=? AND buddy=?"
 		);
 
@@ -330,7 +331,7 @@ void block_buddy(struct pt_context *ctx, unsigned long uid)
 {
 	if (!q_block_buddy) {
 		q_block_buddy = db_prepare(
-			ctx->db_w,
+			db_w,
 			"INSERT INTO blocklist(uid, buddy) VALUES(?, ?) "
 			"ON CONFLICT DO NOTHING"
 		);
@@ -351,7 +352,7 @@ void unblock_buddy(struct pt_context *ctx, unsigned long uid)
 {
 	if (!q_unblock_buddy) {
 		q_unblock_buddy = db_prepare(
-			ctx->db_w,
+			db_w,
 			"DELETE FROM blocklist WHERE uid=? AND buddy=?"
 		);
 
@@ -371,7 +372,7 @@ int user_blocked_me(struct pt_context *ctx, unsigned long uid)
 {
 	if (!blocked_user) {
 		blocked_user = db_prepare(
-			ctx->db_w,
+			db_w,
 			"SELECT COUNT(*) FROM blocklist WHERE uid=? AND buddy=?"
 		);
 
@@ -391,7 +392,7 @@ int i_blocked_user(struct pt_context *ctx, unsigned long uid)
 {
 	if (!blocked_user) {
 		blocked_user = db_prepare(
-			ctx->db_w,
+			db_w,
 			"SELECT COUNT(*) FROM blocklist WHERE uid=? AND buddy=?"
 		);
 
@@ -411,7 +412,7 @@ int is_buddy(struct pt_context *ctx, unsigned long uid)
 {
 	if (!user_is_buddy) {
 		user_is_buddy = db_prepare(
-			ctx->db_w,
+			db_w,
 			"SELECT COUNT(*) FROM buddylist WHERE uid=? AND buddy=?"
 		);
 

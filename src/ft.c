@@ -57,13 +57,14 @@ struct ft_ctx {
 	struct ft_state *state;
 };
 
-static void ft_init(void *ctx, unsigned long conn, int fd)
+static void ft_init(void *ctx, unsigned long conn, int fd, int fd2)
 {
 	struct ft_ctx *c = ctx;
 	struct sockaddr_in addr;
 	socklen_t slen = sizeof addr;
 
 	(void)conn;
+	(void)fd2;
 	fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
 
 	if (!c->state->port[c->recipient]) {
@@ -388,6 +389,7 @@ close:
 static const struct netconn_ops ft_ops[2] = {
 {
 	ft_init,
+	NULL,
 	ft_connect,
 	ft_accept,
 	read_dcc,
@@ -397,6 +399,7 @@ static const struct netconn_ops ft_ops[2] = {
 },
 {
 	ft_init,
+	NULL,
 	NULL,
 	ft_accept,
 	read_new,

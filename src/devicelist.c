@@ -10,6 +10,9 @@
 #include "database.h"
 #include "devicelist.h"
 
+/* server.c */
+extern void *db_w;
+
 /* Prepared queries on db_w */
 static void *in_list;
 static void *add_to_list;
@@ -25,7 +28,7 @@ int device_in_list(struct pt_context *ctx)
 
 	if (!in_list) {
 		in_list = db_prepare(
-			ctx->db_w,
+			db_w,
 			"SELECT COUNT(*) FROM user_devices WHERE uid=? AND device_id=?"
 		);
 	}
@@ -48,7 +51,7 @@ void device_add(struct pt_context *ctx)
 
 	if (!add_to_list) {
 		add_to_list = db_prepare(
-			ctx->db_w,
+			db_w,
 			"INSERT INTO user_devices(uid, device_id) VALUES(?,?)"
 		);
 	}
@@ -71,7 +74,7 @@ void device_inc_logins(struct pt_context *ctx)
 
 	if (!inc_logins) {
 		inc_logins = db_prepare(
-			ctx->db_w,
+			db_w,
 			"UPDATE user_devices SET logins=logins + 1 WHERE uid=? AND device_id=?"
 		);
 	}
