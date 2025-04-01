@@ -43,7 +43,8 @@ SRCS := $(FFTSRC)               \
 	libspeex/sb_celp.c          \
 	libspeex/speex_callbacks.c  \
 	libspeex/speex_header.c     \
-	libspeex/window.c
+	libspeex/window.c           \
+	libspeex/resample.c
 
 OBJS := ${SRCS:.c=.o}
 
