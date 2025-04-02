@@ -8,7 +8,7 @@
 LIBS=-lsqlite3 -lm
 CPPFLAGS=-O2 -D_XOPEN_SOURCE=500 -DNDEBUG -Wall -Wextra -Wno-implicit-fallthrough -Wno-overlength-strings
 LDFLAGS=
-EXLIBS=external/gsm-1.0.12/libgsm.a
+EXLIBS=external/gsm-1.0.12/libgsm.a external/speex-1.2.1/libspeex.a
 
 # Gather the sources
 SRCS  := $(wildcard src/*.c)
@@ -23,17 +23,23 @@ STRIP := $(shell which strip)
 all: ptserver
 
 ptserver: $(HS) $(OBJS) $(EXLIBS)
-	@echo "  LD $@"
+	@echo "LD $@"
 	@$(CC) -o $@ $(OBJS) $(LDFLAGS) $(LIBS) $(EXLIBS)
 ifneq ($(STRIP),)
+	@echo "STRIP $@"
 	@$(STRIP) -S -R .gnu.hash -R .note -R .comment $@
 endif
 
 external/gsm-1.0.12/libgsm.a:
 	@$(MAKE) -C external/gsm-1.0.12 libgsm.a
 
+external/speex-1.2.1/libspeex.a:
+	@$(MAKE) -C external/speex-1.2.1 libspeex.a
+
 clean:
 	@$(RM) -f $(OBJS) ptserver
 	@$(MAKE) -C external/gsm-1.0.12 clean
+	@$(MAKE) -C external/speex-1.2.1 clean
 
 .PHONY: clean
+

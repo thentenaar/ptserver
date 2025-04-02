@@ -21,9 +21,11 @@
 #include "hash.h"
 #include "codec.h"
 #include "gsm.h"
+#include "speex.h"
 #include "service.h"
 #include "packet.h"
 #include "protocol.h"
+#include "macros.h"
 #include "logging.h"
 #include "room.h"
 #include "rtp.h"
@@ -45,18 +47,23 @@ struct rtp_stream {
 	unsigned char      channels;    /* simultaenous speakers */
 	unsigned long      contributor; /* contributor's uid */
 	short              *buf;
+	short              *resample_buf;
 	const struct codec *codec;
+	const struct codec *gsm;
 	struct ht          *uid_to_listener;
 	unsigned long      *listeners; /* connection ids */
 	size_t             n_listeners;
 	unsigned char      *out;       /* RTP packet out */
+	unsigned char      *gsmout;
 	size_t             outsz;
+	size_t             gsmoutsz;
 	unsigned long      ts;         /* last RTP timestamp out */
 	unsigned short     seq_out;    /* last RTP sequence no. */
 };
 
 struct rtp_ctx {
 	struct rtp_stream *stream;
+	unsigned long  pv;        /* protocol version        */
 	unsigned       mute;      /* non-zero if muted       */
 	unsigned       user_mute; /* non-zero if muting room */
 	unsigned       parted;    /* non-zero if parted      */
@@ -72,7 +79,7 @@ static struct rtp_stream **streams;
 static struct ht *rid_to_stream;
 
 static struct rtp_stream *new_stream(unsigned long id, unsigned channels,
-                                     const struct codec *factory)
+                                     unsigned qual, const struct codec *factory)
 {
 	char buf[16];
 	struct rtp_stream *s;
@@ -85,7 +92,7 @@ static struct rtp_stream *new_stream(unsigned long id, unsigned channels,
 	if (!(s = calloc(1, sizeof *s)))
 		abort();
 
-	if (!(s->codec = factory->ops->init())) {
+	if (!(s->codec = factory->ops->init(qual))) {
 		ERROR(("new_stream: failed to instantiate codec `%s'", factory->name));
 		free(s);
 		return NULL;
@@ -99,11 +106,40 @@ static struct rtp_stream *new_stream(unsigned long id, unsigned channels,
 
 	srand(time(NULL) + rand() * rand() * time(NULL));
 	s->ts      = rand();
+	s->out[0]  = (s->outsz >> 24) & 0xff;
+	s->out[1]  = (s->outsz >> 16) & 0xff;
+	s->out[2]  = (s->outsz >> 8)  & 0xff;
+	s->out[3]  = s->outsz & 0xff;
+	s->out[4]  = 0x80;
 	s->out[5]  = s->codec->pt;
 	s->out[12] = (id >> 24) & 0xff;
 	s->out[13] = (id >> 16) & 0xff;
 	s->out[14] = (id >> 8)  & 0xff;
 	s->out[15] = id & 0xff;
+
+	if (factory != &gsm_factory) {
+		if (!(s->gsm = gsm_factory.ops->init(qual))) {
+			ERROR(("new_stream: failed to instantiate fallback codec `gsm'"));
+			free(s);
+			return NULL;
+		}
+
+		s->gsmoutsz = 4 + RTP_HEADERSZ + s->gsm->frame_size * FRAMES_PKT;
+		if (!(s->gsmout = malloc(4 + s->gsmoutsz)))
+			abort();
+
+		memcpy(s->gsmout, s->out, 16);
+		s->gsmout[0] = (s->gsmoutsz >> 24) & 0xff;
+		s->gsmout[1] = (s->gsmoutsz >> 16) & 0xff;
+		s->gsmout[2] = (s->gsmoutsz >> 8)  & 0xff;
+		s->gsmout[3] = s->gsmoutsz & 0xff;
+		s->gsmout[5] = s->gsm->pt;
+	}
+
+	if (s->gsm && s->gsm->rate != s->codec->rate) {
+		if (!(s->resample_buf = malloc(2 * max(s->codec->spkt, s->gsm->spkt))))
+			abort();
+	}
 
 	if (!(s->buf = malloc(s->codec->spkt * 2)) ||
 	    !(s->uid_to_listener = ht_alloc(HT_VALUE_DEFAULT, 0)) ||
@@ -143,6 +179,9 @@ static void free_stream(struct rtp_stream *s)
 	if (s->codec && s->codec->ops->free)
 		s->codec->ops->free((void *)s->codec);
 
+	if (s->gsm && s->gsm->ops->free)
+		s->gsm->ops->free((void *)s->gsm);
+
 	for (i = 0; i < s->n_listeners; i++) {
 		if ((c = net_get_ctx(s->listeners[i])))
 			c->parted++;
@@ -153,7 +192,9 @@ static void free_stream(struct rtp_stream *s)
 	ht_rm(rid_to_stream, buf);
 	ht_free(s->uid_to_listener);
 	free(s->out);
+	free(s->gsmout);
 	free(s->listeners);
+	free(s->resample_buf);
 	free(s->buf);
 	free(s);
 }
@@ -249,17 +290,19 @@ static void rtp_read(void *ctx, unsigned long conn, int fd)
 		if (!(c->stream = ht_get_ptr_nc(rid_to_stream, (char *)buf)))
 			goto err;
 
+		/* speex: the client adds a spurious 2-byte length after the last frame */
 		codec    = c->stream->codec;
-		pkt_size = RTP_HEADERSZ + 4 + codec->frame_size * FRAMES_PKT;
+		pkt_size = RTP_HEADERSZ + 6 + codec->frame_size * FRAMES_PKT;
 		if (!(c->in = calloc(1, pkt_size)))
 			goto err;
 		sprintf((char *)buf, "%lu", c->uid);
 
-		errno = 0;
-		if (!ht_get_ptr(c->stream->uid_to_listener, (char *)buf)) {
-			/* We didn't get a join notification? */
-			if (errno == ENOENT)
+		if (!c->pv) {
+			c->pv = ht_get_long(c->stream->uid_to_listener, (char *)buf);
+			if (c->pv == ULONG_MAX) {
+				/* We didn't get a join notification? */
 				goto err;
+			}
 			ht_set(c->stream->uid_to_listener, (char *)buf, HT_PTR, c);
 		}
 
@@ -288,8 +331,12 @@ static void rtp_read(void *ctx, unsigned long conn, int fd)
 	}
 
 	codec = c->stream->codec;
+	if (c->pv <= PROTOCOL_VERSION_70)
+		codec = c->stream->gsm;
 	net_set_timeout(conn, 0);
-	if (pkt_size != RTP_HEADERSZ + 4 + codec->frame_size * FRAMES_PKT)
+
+	if (pkt_size < RTP_HEADERSZ + 4 + codec->frame_size * FRAMES_PKT ||
+	    pkt_size > RTP_HEADERSZ + 6 + codec->frame_size * FRAMES_PKT)
 		goto err;
 
 	/* Read packet + uin */
@@ -308,8 +355,12 @@ static void rtp_read(void *ctx, unsigned long conn, int fd)
 	 * Validate pt
 	 *
 	 * NB: The marker bit is set on the first frame where the user
-	 * keys-up the mic with the non-GSM codecs.
+	 * keys-up the mic with the non-GSM codecs, probably because of
+	 * rfc5574, though this is unused by the client.
 	 */
+	if ((c->in[1] & 0x7f) != codec->pt && (c->in[1] & 0x7f) == c->stream->gsm->pt)
+		codec = c->stream->gsm;
+
 	if ((c->in[1] & 0x7f) != codec->pt) {
 		DEBUG(("Wrong payload type: %u where %u expected",
 		      c->in[1] & 0x7f, codec->pt));
@@ -332,8 +383,15 @@ static void rtp_read(void *ctx, unsigned long conn, int fd)
 		codec->ops->decode(
 			codec,
 			c->in + RTP_HEADERSZ + codec->frame_size * i,
-			c->stream->buf + i * codec->spf
+			((codec->rate == c->stream->codec->rate) ?
+			  c->stream->buf : c->stream->resample_buf) + i * codec->spf
 		);
+	}
+
+	if (codec->rate != c->stream->codec->rate) {
+		resample(c->stream->resample_buf, codec->spkt, codec->rate,
+		         c->stream->buf, c->stream->codec->spkt,
+		         c->stream->codec->rate);
 	}
 
 	c->stream->contributor = c->uid;
@@ -349,6 +407,8 @@ err:
 static void rtp_write(void *ctx, unsigned long conn, int fd)
 {
 	int bs = 0;
+	void *out;
+	size_t outsz;
 	struct rtp_ctx *c = ctx;
 
 	if (!c->stream || !c->uid || !c->stream->contributor || c->user_mute)
@@ -358,8 +418,15 @@ static void rtp_write(void *ctx, unsigned long conn, int fd)
 	if (c->stream->contributor == c->uid)
 		goto done;
 
+	out   = c->stream->out;
+	outsz = c->stream->outsz;
+	if (c->pv <= PROTOCOL_VERSION_70 && c->stream->gsm) {
+		out   = c->stream->gsmout;
+		outsz = c->stream->gsmoutsz;
+	}
+
 	/* The packet should generally be smaller than the applicable MTU */
-	bs = send(fd, c->stream->out, 4 + c->stream->outsz, 0);
+	bs = send(fd, out, 4 + outsz, 0);
 
 done:
 	if (bs < 0)
@@ -402,7 +469,7 @@ static void rtp_close(void *ctx, unsigned long conn, int fd)
 
 	sprintf(buf, "%lu", c->uid);
 	if (c->parted) ht_rm(c->stream->uid_to_listener, buf);
-	else ht_set(c->stream->uid_to_listener, buf, HT_PTR, NULL);
+	else ht_set(c->stream->uid_to_listener, buf, HT_LONG, &c->pv);
 
 	/* Notify the parent of the disconnection */
 	if (!c->parted && c->stream && c->uid) {
@@ -447,7 +514,8 @@ static struct netconn_ops rtp_ops = {
 
 static void rtp_service_start(void)
 {
-	unsigned i, j;
+	unsigned i, j, rs;
+	struct rtp_stream *s;
 
 	INFO(("RTP service starting"));
 	rid_to_stream = ht_alloc(HT_VALUE_DEFAULT, 0);
@@ -455,33 +523,28 @@ static void rtp_service_start(void)
 	if (net_conn(NULL, &rtp_ops, (struct sockaddr *)&server_addr,
 	             sizeof server_addr, CONN_STREAM | CONN_LISTEN) == ULONG_MAX) {
 		ERROR(("rtp service: Failed to listen on %u", voice_port));
+		ht_free(rid_to_stream);
 		return;
 	}
 
 	while (!got_sig) {
 		service_recv(THIS_SERVICE);
 		if (net_poll(NET_POLL_R, FRAME_TIME))
-			return;
+			break;
 
 		/* Prepare packets for transmission */
 		for (i = 0; i < n_streams; i++) {
-			if (!streams[i]->contributor)
+			s = streams[i];
+			if (!s->contributor)
 				continue;
 
-			streams[i]->outsz   = 4 + RTP_HEADERSZ +
-			                      streams[i]->codec->frame_size * FRAMES_PKT;
-			streams[i]->out[0]  = (streams[i]->outsz >> 24) & 0xff;
-			streams[i]->out[1]  = (streams[i]->outsz >> 16) & 0xff;
-			streams[i]->out[2]  = (streams[i]->outsz >> 8)  & 0xff;
-			streams[i]->out[3]  = streams[i]->outsz & 0xff;
-			streams[i]->out[4]  = 0x80;
-			streams[i]->out[6]  = (++streams[i]->seq_out >> 8) & 0xff;
-			streams[i]->out[7]  = streams[i]->seq_out & 0xff;
-			streams[i]->out[8]  = (streams[i]->ts >> 24) & 0xff;
-			streams[i]->out[9]  = (streams[i]->ts >> 16) & 0xff;
-			streams[i]->out[10] = (streams[i]->ts >> 8)  & 0xff;
-			streams[i]->out[11] = streams[i]->ts & 0xff;
-			streams[i]->ts     += streams[i]->codec->spkt;
+			s->out[6]  = (++s->seq_out >> 8) & 0xff;
+			s->out[7]  = s->seq_out & 0xff;
+			s->out[8]  = (s->ts >> 24) & 0xff;
+			s->out[9]  = (s->ts >> 16) & 0xff;
+			s->out[10] = (s->ts >> 8)  & 0xff;
+			s->out[11] = s->ts & 0xff;
+			s->ts     += s->codec->spkt;
 
 			/**
 			 * Since the client (sadly) doesn't take advantage of csrc or
@@ -493,31 +556,56 @@ static void rtp_service_start(void)
 			 * start of the audio data, and the uid at the end; in spite
 			 * of the 'channels' room parameter.
 			 */
-			streams[i]->out[4 + streams[i]->outsz - 1] = (streams[i]->contributor >> 24) & 0xff;
-			streams[i]->out[4 + streams[i]->outsz - 2] = (streams[i]->contributor >> 16) & 0xff;
-			streams[i]->out[4 + streams[i]->outsz - 3] = (streams[i]->contributor >> 8)  & 0xff;
-			streams[i]->out[4 + streams[i]->outsz - 4] = streams[i]->contributor & 0xff;
+			s->out[4 + s->outsz - 1] = (s->contributor >> 24) & 0xff;
+			s->out[4 + s->outsz - 2] = (s->contributor >> 16) & 0xff;
+			s->out[4 + s->outsz - 3] = (s->contributor >> 8)  & 0xff;
+			s->out[4 + s->outsz - 4] = s->contributor & 0xff;
 
 			for (j = 0; j < FRAMES_PKT; j++) {
-				streams[i]->codec->ops->encode(
-					streams[i]->codec,
-					streams[i]->buf + j * streams[i]->codec->spf,
-					streams[i]->out + 16 + j * streams[i]->codec->frame_size
+				s->codec->ops->encode(
+					s->codec,
+					s->buf + j * s->codec->spf,
+					s->out + 16 + j * s->codec->frame_size
+				);
+			}
+
+			/* Also gsm if needed */
+			if (!s->gsmout)
+				continue;
+
+			rs = s->gsm->rate != s->codec->rate;
+			memcpy(s->gsmout + 6, s->out + 6, 6);
+			memcpy(s->gsmout + 4 + s->gsmoutsz - 4,
+				   s->out + 4 + s->outsz - 4, 4);
+
+			if (rs) {
+				resample(s->buf, s->codec->spkt, s->codec->rate,
+				         s->resample_buf, s->gsm->spkt, s->gsm->rate);
+			}
+
+			for (j = 0; j < FRAMES_PKT; j++) {
+				s->gsm->ops->encode(
+					s->gsm,
+					(rs ? s->resample_buf : s->buf) + j * s->gsm->spf,
+					s->gsmout + 16 + j * s->gsm->frame_size
 				);
 			}
 		}
 
 		if (net_poll(NET_POLL_W, FRAME_TIME))
-			return;
+			break;
 
 		/* Clear the buffer for the next round */
 		for (i = 0; i < n_streams; i++) {
-			streams[i]->contributor = 0;
-			if (!streams[i]->codec)
+			s = streams[i];
+			s->contributor = 0;
+			if (!s->codec)
 				continue;
-			memset(streams[i]->buf, 0, streams[i]->codec->spkt * 2);
+			memset(s->buf, 0, s->codec->spkt * 2);
 		}
 	}
+
+	ht_free(rid_to_stream);
 }
 
 /**
@@ -563,9 +651,8 @@ void rtpctl(unsigned char msg, unsigned long rid, unsigned long uid,
  */
 static void rtp_child_read(int fd)
 {
-	char buf[32], *data = NULL, cmd, *codec;
-	unsigned channels;
-	unsigned long len, rid, uid;
+	char buf[32], *data = NULL, cmd, *codec, *s;
+	unsigned long channels, pv, len, rid, uid, qual;
 	struct rtp_ctx *c;
 	struct rtp_stream *stream;
 
@@ -596,15 +683,25 @@ static void rtp_child_read(int fd)
 
 		switch (cmd) {
 		case RTP_JOIN: /* User joined */
+			codec    = strchr(data + 9, '\n') + 1;
+			channels = strtoul(data + 9, NULL, 10);
+			s        = strchr(codec, '\n');
+			*s++     = '\0';
+			qual     = strtoul(s, NULL, 10);
+			pv       = strtoul(strchr(s, '\n') + 1, NULL, 10);
+
 			if (!stream && data && len > 9) {
-				codec    = strchr(data + 9, '\n') + 1;
-				channels = strtoul(data + 9, NULL, 10);
 				switch (*codec) {
 				case 'g':
-					stream = new_stream(rid, channels, &gsm_factory);
+					stream = new_stream(rid, channels, qual, &gsm_factory);
 					break;
+				case 's':
+					if (codec[1] == 'p') {
+						stream = new_stream(rid, channels, qual, &speex_factory);
+						break;
+					}
 				default:
-					ERROR(("rtp: join: unknown codec: %.*s", len - (codec - data), codec));
+					ERROR(("rtp: join: unknown codec: %s", codec));
 					goto next;
 				}
 			}
@@ -617,7 +714,7 @@ static void rtp_child_read(int fd)
 			/* Add an entry to the hash so we know it should be there */
 			if (!c) {
 				sprintf(buf, "%lu", uid);
-				ht_set(stream->uid_to_listener, buf, HT_PTR, NULL);
+				ht_set(stream->uid_to_listener, buf, HT_LONG, &pv);
 			}
 
 			break;
@@ -687,9 +784,8 @@ static void rtp_parent_read(int fd)
 
 static void rtp_service_stop(void)
 {
-	INFO(("RTP service shutting down..."));
+	INFO(("RTP service shutdown..."));
 	got_sig++;
-	ht_free(rid_to_stream);
 }
 
 struct service_ops rtp_service_ops = {

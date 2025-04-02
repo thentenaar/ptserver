@@ -907,7 +907,7 @@ void join(struct pt_context *ctx, unsigned long rid, unsigned long code,
 			"(SELECT nickname FROM users WHERE uid=owner)), '\\n', "
 			"CHAR(10)) AS data, (code == ?), "
 			"(password IS NULL OR password == ?), ?, "
-			"CONCAT(channels & 0xf, CHAR(10), codec) "
+			"CONCAT(channels, CHAR(10), codec, CHAR(10), qual, CHAR(10), ?) "
 			"FROM rooms WHERE id=?"
 		);
 	}
@@ -923,7 +923,8 @@ void join(struct pt_context *ctx, unsigned long rid, unsigned long code,
 	}
 
 	db_reset_prepared(join_query);
-	db_bind(join_query, "itii", code, passwd, !!invis, rid);
+	db_bind(join_query, "itiii", code, passwd, !!invis,
+	        ctx->protocol_version, rid);
 	s = db_get_prepared_sql(join_query);
 	if (db_exec(db_w, ctx, s, join_room_cb)) {
 		db_free(s);

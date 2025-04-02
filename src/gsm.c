@@ -15,16 +15,18 @@
 const struct codec gsm_factory;
 struct codec_ops gsm_ops;
 
-/* external/gsm-1.0.12 */
+/* {{{ external/gsm-1.0.12 */
 extern void *gsm_create(void);
 extern void gsm_destroy(void *);
 extern void gsm_encode(void *, short *, unsigned char  *);
 extern int  gsm_decode(void *, unsigned char *, short *);
+/* }}} */
 
-static struct codec *init(void)
+static struct codec *init(unsigned qual)
 {
 	struct codec *new;
 
+	(void)qual;
 	if (!(new = malloc(sizeof *new)))
 		abort();
 
@@ -53,7 +55,7 @@ static void _free(struct codec *c)
 	free(c);
 }
 
-struct codec_ops factory_ops = {
+static struct codec_ops factory_ops = {
 	init,
 	NULL,
 	NULL,
@@ -72,6 +74,6 @@ const struct codec gsm_factory = {
 	"gsm_factory",
 	/* rate, samp_per_frame, samp_per_packet, frame_size, pt */
 	8000, 160, 640, 33, 3,
-	NULL, NULL
+	NULL, NULL, NULL
 };
 

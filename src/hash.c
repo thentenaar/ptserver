@@ -146,6 +146,7 @@ static unsigned int insert(struct ht *ht, const char *key,
 
 	while (ht->e[i].h & ~HT_TOMBSTONE) {
 		if (ht->e[i].h == h && !strcmp(ht->e[i].k, key)) {
+			--ht->size;
 			if (!(ht->flags & (HT_STATIC_KEYS | HT_RESIZE)))
 				free(ht->e[i].k);
 			if (ht->e[i].t == HT_STR)

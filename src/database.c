@@ -167,7 +167,7 @@ static const char * const schema[] = {
 "	size         INT DEFAULT 15,"                      /* PT 7+: max occupancy */
 "	premium      INT DEFAULT 0,"                       /* PT 7+: Non-zero if created by a premium user? */
 "	codec        TEXT NOT NULL DEFAULT 'gsmproj.dll'," /* PT 8+: Audio codec for the room */
-"	qual         INT DEFAULT 1,"                       /* PT 8+: Codec quality (sample rate) setting */
+"	qual         INT DEFAULT 1,"                       /* PT 8+: Codec quality (sample rate / bit rate) setting */
 "	channels     INT DEFAULT 1,"                       /* PT 9+: Number of simultaneous speakers (TODO: investigate) */
 "	password     TEXT,"
 "	banner_url   TEXT,"

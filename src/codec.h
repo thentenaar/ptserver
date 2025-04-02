@@ -9,7 +9,6 @@
 #define CODEC_H
 
 #if 0
-	{ 16000, 2, 320, 1280, 54,  0 }, /* Speex */
 	{ 32000, 2, 640, 2560, 122, 0 }  /* Siren / G722.1C */
 #endif
 
@@ -25,17 +24,18 @@
 struct codec {
 	struct codec_ops *ops;
 	const char *name;
-	const unsigned rate;       /* sample rate (Hz)   */
-	const unsigned spf;        /* samples per frame  */
-	const unsigned spkt;       /* samples per packet */
-	const unsigned frame_size; /* (in bytes)         */
-	const unsigned pt;         /* RTP payload type   */
-	void *e_state;             /* Encoder state      */
-	void *d_state;             /* Decoder state      */
+	const unsigned rate;       /* sample rate (Hz)    */
+	const unsigned spf;        /* samples per frame   */
+	const unsigned spkt;       /* samples per packet  */
+	const unsigned frame_size; /* (in bytes)          */
+	const unsigned pt;         /* RTP payload type    */
+	void *e_state;             /* Encoder state       */
+	void *d_state;             /* Decoder state       */
+	void *ud;                  /* Codec-specific data */
 };
 
 struct codec_ops {
-	struct codec *(*init)(void);
+	struct codec *(*init)(unsigned qual);
 	void (*encode)(const struct codec *c, short *in, unsigned char *out);
 	void (*decode)(const struct codec *c, unsigned char *in, short *out);
 	void (*free)(struct codec *c);
