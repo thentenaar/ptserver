@@ -13,6 +13,24 @@ Dependencies
 
 - sqlite3
 
+Synopsis
+--------
+
+```
+ptserver [-h] [-d database_file] [-p port] [-m max_connections]
+         [-s server_ip] [-t connection_timeout] [-x external_ip]
+
+The defaults are: -d ptserver.db -p 5001 -m 8192 -s 0.0.0.0 -t 120 -x 127.0.0.1
+
+Note: the argument given for -m may be constrained by resource limits.
+Also, the port used for room audio will be port + 1.
+The port for HTTP will be port + 2 for non-root users.
+external_ip is the IPv4 address the client should connect to.
+```
+
+``-x`` must be specified if you're running the client in a VM, or somewhere
+other than localhost.
+
 Getting Started
 ---------------
 

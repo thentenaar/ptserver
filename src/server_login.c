@@ -29,7 +29,7 @@ extern struct ht *uid_to_context;
 
 void login_transition(struct pt_context *ctx)
 {
-	send_packet(ctx, new_packet(PACKET_HELLO, 0, NULL, 0));
+	send_packet(ctx, new_packet(PACKET_HELLO, HELLO_LEN, hello, PACKET_F_STATIC));
 }
 
 void login_flow(struct pt_context *ctx)
@@ -49,14 +49,13 @@ void login_flow(struct pt_context *ctx)
 	}
 
 	switch (ctx->pkt_in.type) {
-	case PACKET_OLD_CLIENT_HELLO:
+	case PACKET_INTRODUCE_UID:
 		/**
 		 * OBSOLETE: Data is simply the uid in network byte order, but
 		 * 5.x sends GET_UID anyway and reconnects after UID_RESPONSE.
 		 */
 		ctx->uid = uid;
 		ctx->protocol_version = ctx->pkt_in.version;
-		break;
 	case PACKET_CLIENT_HELLO:
 		send_packet(ctx, new_packet(PACKET_HELLO, HELLO_LEN, hello, PACKET_F_STATIC));
 		break;
@@ -122,7 +121,7 @@ void login_flow(struct pt_context *ctx)
 		 * Data:
 		 *   0  -  3: uid (32 bits)
 		 *   4  -  7: 00 00 00 01 (constant)
-		 *   8  -  9: 00 00 [PT 7 - 9.2: 00 02, 10.2+: 04 09 00 02] (5.1: value of notANewUser reg. entry)
+		 *   8  -  9: 00 00 [PT 5: 00 01, 7 - 9.2: 00 02, 10.2+: 04 09 00 02] (5.1: value of notANewUser reg. entry)
 		 * PT 5.1+:
 		 *   10 - 13: 00 00 00 1e (Initial Status: Online/Away/DND/Invisible)
 		 *   14 -  *: encoded fs serial (v1, challenge of uid % 0x37)
@@ -150,7 +149,8 @@ void login_flow(struct pt_context *ctx)
 		}
 
 		s = NULL;
-		if (ctx->uid != UID_NEWUSER && !device_in_list(ctx))
+		if (ctx->pkt_in.version >= PROTOCOL_VERSION_51 &&
+		    ctx->uid != UID_NEWUSER && !device_in_list(ctx))
 			user_get_secret_question(ctx->db_r, ctx->uid, &s);
 
 		if (ctx->pkt_in.version < PROTOCOL_VERSION_82) {
@@ -160,7 +160,7 @@ void login_flow(struct pt_context *ctx)
 			 *   4 - x  : challenge (only first three digits used)
 			 * Optional:
 			 *   x+1    : "\n"
-			 *   x+2 - *: Secret question prompt
+			 *   x+2 - *: Secret question prompt (ignored in PT 5.0)
 			 */
 
 			if (!(buf = malloc(8 + (s ? strlen(s) : 0))))

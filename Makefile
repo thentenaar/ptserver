@@ -27,7 +27,7 @@ ptserver: $(HS) $(OBJS) $(EXLIBS)
 	@$(CC) -o $@ $(OBJS) $(LDFLAGS) $(LIBS) $(EXLIBS)
 ifneq ($(STRIP),)
 	@echo "STRIP $@"
-	@$(STRIP) -S -R .gnu.hash -R .note -R .comment $@
+	@$(STRIP) -S -R .note -R .comment $@
 endif
 
 external/gsm-1.0.12/libgsm.a:

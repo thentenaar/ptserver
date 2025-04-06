@@ -100,7 +100,7 @@
 //#define 0xe87c /* Unknown TODO: investigate 11.8: "VideoStartViewing" */
 //#define 0xe882 /* PT 11.8: "VideoChangePublishingIcon" TODO: investigate */
 //#define 0xe884 /* Cessation of video publishing? Sent from room dialog proc. TODO: investigate 11.8: "VideoStopPublishToGroup" */
-//#define 0xe886 /* PT 7+: Unknown TODO: investigate 11.8: "VideoStartPublishToGroup" */
+//#define 0xe886 /* PT 5+: Unknown TODO: investigate 11.8: "VideoStartPublishToGroup" */
 //#define 0xe888 /* PT 9.0+: Unknown [Unused?] TODO: investigate 11.8: "VideoViewUid" */
 //#define 0xe889 /* PT 9.0+: Unknown [Unused?] TODO: investigate 11.8: "VideoPublishToUid" */
 //#define 0xe88a /* PT 9.0+: Unknown [Unused?] TODO: investigate 11.8: "VideoPublishToWorld" */
@@ -169,13 +169,13 @@
 #define PACKET_COMMENCING_AUTOJOIN      0xfb00 /* PT 7+: 0-length Sent in response to LOGIN_SUCCESS before doing the autojoin. 11.8 calls this "OpenItUp" */
 #define PACKET_USER_FUCKER_STATUS       0xfb0a /* Inform the server which actions the USER_FUCKER took. 11.8 calls this "floatsamfailure" */
 //#define 0xfb59 /* PT 10.2+: "DynamicCodeReply" TODO: investigate */
-//#define 0xfb64 /* PT 9.0+: Unused? TODO: investigate */
+//#define 0xfb64 /* PT 5.0,9.0+: Unused? TODO: investigate */
 //#define 0xfb6d /* PT 11.8: "FacebookConnectChallengeReply" TODO: investigate */
 //#define 0xfb6e /* PT 11.8: "FacebookConnectLogin" TODO: investigate */
 #define PACKET_VERIFY_EMAIL             0xfb75 /* PT8+: Request an email verification code */
 #define PACKET_EMAIL_VERIFIED           0xfb76 /* PT8+: Informs the server of successful email verification */
 #define PACKET_NEW_PASSWORD             0xfb78
-//#define 0xfb82 /* PT 9.0+: TODO: investigate 11.8: "PasswordResetRequest" 4 bytes (uid?) */
+//#define 0xfb82 /* PT 5.0,9.0+: TODO: investigate 11.8: "PasswordResetRequest" 4 bytes (uid?) */
 #define PACKET_LOGIN                    0xfb84
 //#define 0xfb93 /* PT 8+: Signifies a login issue (not capable to login, or register?) data: uid TODO: investigate 11.8: "sendPreSearchOffsiteWebClient" */
 #define PACKET_GET_UID                  0xfb95
@@ -201,12 +201,12 @@
 #define PACKET_ACCEPT_VIDEO_CALL        0xfd3a /* data: uid, port (2 bytes) */
 #define PACKET_DECLINE_VIDEO_CALL       0xfd43 /* data: uid */
 #define PACKET_START_PRIVATE_VIDEO      0xfd44 /* data: uid, port */
-//#define 0xfd58 /* PT 9.0+: Unknown TODO: investigate 11.8: "sendOnlineSearchRequest" */
+//#define 0xfd58 /* PT 5.0,9.0+: Unknown 0-length TODO: investigate 11.8: "sendOnlineSearchRequest" */
 //#define 0xfd65 /* PT 10.2+: "SendEpsilonFunc" TODO: investigate */
 //#define 0xfd6a /* PT 9.0+: "TypeAhead" data: 4 bytes, 2 bytes  TODO: investigate */
 #define PACKET_CHANGE_STATUS            0xfd94 /* PT8: 00 00 00 46, custom away msg */
-//#define 0xfd9e /* PT 9.0/9.1: Unknown 0-length [Unused?] TODO investigate */
-//#define 0xfda8 /* PT 9.0/9.1: Unknown data: string [Unused?] TODO investigate */
+//#define 0xfd9e /* PT 5.0,9.0/9.1: Unknown 0-length [Unused?] TODO investigate */
+//#define 0xfda8 /* PT 5.0,9.0/9.1: Unknown data: string [Unused?] TODO investigate */
 //#define 0xfde4 /* PT 11.8: "TransmitVariableChangeToContra" TODO: investigate */
 //#define 0xfde7 /* PT 11.8: "OneOnOneCallTerminate" TODO investigate */
 //#define 0xfded /* PT 11.8: "OneOnOneCallInviteReply" TODO investigate */
@@ -215,10 +215,7 @@
 #define PACKET_GET_PRIVACY              0xfe02 /* 0-length */
 #define PACKET_BLOCK_BUDDY              0xfe0c
 //#define 0xfe27 /* PT 10.2: TODO: investigate (not in 11?) */
-//#define 0xfe3c /* PT 9.0+: Unknown [Unused?] TODO: investigate 11.8: "sendRefusal" */
-//#define 0xfe3e /* PT 5.1: "sendRinger" Request a call data: uid, 0000082a (default voice port, constant) */
-//#define 0xfe3f /* PT 9.0+: Unknown [Unused?] TODO: investigate 11.8: "sendPickup" */
-//#define 0xfe40 /* PT 5.1: "sendHangup" Hangup a call / cancel a request data: uid */
+//#define 0xfe3c /* PT 5.0,9.0+: Unknown [Unused?] TODO: investigate 11.8: "sendRefusal" */
 //#define 0xfe4b /* PT 10.2: TODO: investigate (not in 11?) */
 //#define 0xfe4c /* PT 10.2: TODO: investigate (not in 11?) */
 //#define 0xfe4d /* PT 10.2: TODO: investigate (not in 11?) */
@@ -248,7 +245,7 @@
 #define PACKET_ROOM_SET_TOPIC           0xfea1 /* data: room_id, topic */
 #define PACKET_ROOM_MESSAGE_OUT         0xfea2
 //#define 0xfeab /* PT 10.2+: "groupWhisper" TODO: investigate */
-//#define 0xfeac /* PT 9.0+: Unknown [Unused?] TODO: investigate 11.8: "groupMembers" */
+//#define 0xfeac /* PT 5.0,9.0+: Unknown [Unused?] TODO: investigate 11.8: "groupMembers" */
 #define PACKET_LIST_SUBCATEGORY         0xfeaf /* PT 8.2+: List rooms in a subcategory. data: category_id, subcategory_id */
 #define PACKET_NEW_LIST_CATEGORY        0xfeb0 /* PT 8.2+: simplification of the older LIST_CATEGORY. data: category_id */
 #define PACKET_REQUEST_014F             0xfeb1 /* PT 8+ - 10.2: Request 0x014f 0-length TODO: investigate */
@@ -274,7 +271,6 @@
 //#define 0xff7c /* PT 8+: Unknown (advertising related?) TODO: investigate */
 #define PACKET_REGISTRATION_ADINFO      0xff7e /* PT8/9: [registration] advertising-related settings */
 #define PACKET_CLIENT_HELLO             0xff9b
-//#define 0xff9c /* PT 9+: Unknown [Unused?] TODO: investigate 11.8: "IntroduceUid" */
 #define PACKET_GET_LANGUAGES            0xffa2 /* PT 11.7: "GetLanguages" 0-length */
 //#define 0xffa3 /* PT 11.8: "GetGroupRecentlyVisited" TODO: investigate */
 //#define 0xffac /* PT 11.8: "GroupFavoritesRemove" TODO: investigate */
@@ -292,7 +288,7 @@
 #define PACKET_UPDATE_PROFILE           0xffbf /* PT5: Sent by the alter user info dialog; the return code is referenced in 7/8. TODO: return code? */
 //#define 0xffc6 /* PT 11.7: "ShowGroupsIn" Show others which room I'm in. data: 'Y' or 'N' */
 #define PACKET_PERSONALS_MSG_OUT        0xffe6 /* PT5: Personals message reply. data: dw1, dw2, recipient_uid, sender_uid, message */
-//#define 0xffe7 /* PT 9.0+: Unknown [Unused?] TODO: investigate 11.8: "SendGetPalProfileMsgs" */
+//#define 0xffe7 /* PT 5.0,9.0+: Unknown [Unused?] TODO: investigate 11.8: "SendGetPalProfileMsgs" */
 #define PACKET_IM_OUT                   0xffec
 
 /**
@@ -524,18 +520,21 @@
                                                      00 01 - play
                                                */
 #define PACKET_PT5_EMAIL_VERIFY         0xf768 /* data: 00 01 <verification_code> */
+#define PACKET_PT5_CHECKSUMS            0xf7b7 /* PT 5.0: Older version of CHECKSUMS? */
+//#define 0xfa7e /* PT 5.0: Unknown data: string (PC-to-Phone registration?) */
+//#define 0xfb1e /* PT 5.0: Unknown data: 4 bytes, 4 bytes TODO: investigate */
 #define PACKET_PT5_C_DRIVE_SERIAL       0xfb37 /* data: [response to 0x04c9] drive C volume serial (variant 1 encoded) */
 #define PACKET_PT5_REGISTRATION         0xfb6e
-#define PACKET_PT5_START_VOICE_CALL     0xfe3e /* data: uid_other_end port (network order) */
-#define PACKET_PT5_ACCEPT_VOICE_CALL    0xfe3f /* data: uid_other_end */
-#define PACKET_PT5_HANGUP_VOICE_CALL    0xfe40 /* data: uid_other_end */
+#define PACKET_PT5_START_VOICE_CALL     0xfe3e /* "sendRinger" data: uid_other_end port (network order) */
+#define PACKET_PT5_ACCEPT_VOICE_CALL    0xfe3f /* "sendPickup" data: uid_other_end */
+#define PACKET_PT5_HANGUP_VOICE_CALL    0xfe40 /* "sendHangup" data: uid_other_end */
 #define PACKET_DCC_XFER_INIT            0xfe43
 #define PACKET_DCC_XFER_ACCEPT          0xfe44
 #define PACKET_DCC_XFER_REJECT          0xfe45
 #define PACKET_PT5_DECLINE_VOICE_CALL   0xfec3 /* data: uid_other_end */
 #define PACKET_ROOM_CREATE              0xfed4 /* PT 5: Create a room data: flags: 00 00 - no voice or private, 01 - private&voice, 03 - voice, 05 - private, category_id, 0000082a (constant), rating room_name \n password */
 #define PACKET_PT5_PING                 0xff60 /* PT 5: "sendPing" sent on a 1/minute timer (0x7e9) from room_dialog. 0-length */
-#define PACKET_OLD_CLIENT_HELLO         0xff9c /* Client hello packet */
+#define PACKET_INTRODUCE_UID            0xff9c /* PT 5: "introduceUid" data: uid */
 
 /* server -> client */
 #define PACKET_PT5_INVITE_STATUS        0x00c8 /* Status of sent invites. 0xc8 delimited list of email= status= */

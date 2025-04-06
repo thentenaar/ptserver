@@ -45,10 +45,10 @@ static void service_init(void *ctx, unsigned long conn, int fd, int fd2)
 	if (!(c->pid = fork())) {
 		c->fd = fd2;
 		net_reset(conn, fd2);
+		close(STDIN_FILENO);
 		if (c->ops->start) c->ops->start();
-		for (i = 1; i < max_conn; i++)
+		for (i = 0; i < max_conn; i++)
 			net_close(i);
-		net_close(0);
 		exit(EXIT_SUCCESS);
 	}
 

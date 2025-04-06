@@ -50,6 +50,7 @@ union value {
 	const char *s;
 	const void *p;
 	void *nc;
+	void (*fp)(void);
 };
 
 struct entry {
@@ -168,8 +169,9 @@ static unsigned int insert(struct ht *ht, const char *key,
 	k = NULL;
 
 	switch (t) {
-	case HT_LONG: ht->e[i].v.l = *(const unsigned long *)v; break;
-	case HT_PTR:  ht->e[i].v.p = v;                         break;
+	case HT_LONG: ht->e[i].v.l  = *(const unsigned long *)v; break;
+	case HT_PTR:  ht->e[i].v.p  = v;                         break;
+	case HT_FPTR: ht->e[i].v.fp = *(void (**)(void))v;       break;
 	default: /* HT_STR */
 		if (!(ht->e[i].v.s = malloc(strlen((const char *)v) + 1))) {
 			if (!(ht->flags & HT_STATIC_KEYS))
@@ -222,8 +224,9 @@ static int resize(struct ht *ht, unsigned int capacity)
 			continue;
 
 		switch(e[i].t) {
-		case HT_LONG: v = &e[i].v.l; break;
-		default:      v = e[i].v.p;  break;
+		case HT_LONG: v = &e[i].v.l;  break;
+		case HT_FPTR: v = &e[i].v.fp; break;
+		default:      v = e[i].v.p;   break;
 		}
 
 		insert(ht, e[i].k, v, e[i].t);
@@ -299,6 +302,7 @@ static const void *ht_get(struct ht *ht, const char *key, unsigned int type)
 	switch (ht->e[i].t) {
 	case HT_LONG: return (const void *)&ht->e[i].v.l;
 	case HT_STR:  return ht->e[i].v.s;
+	case HT_FPTR: return (const void *)&ht->e[i].v.fp;
 	default:      return ht->e[i].v.p;
 	}
 
@@ -343,7 +347,7 @@ unsigned long ht_get_long(struct ht *ht, const char *key)
  * \param[in] key Key to find
  * \return a pointer to the string stored at \a key, or NULL on error
  */
-const void *ht_get_str(struct ht *ht, const char *key)
+const char *ht_get_str(struct ht *ht, const char *key)
 {
 	return ht_get(ht, key, HT_STR);
 }
@@ -390,6 +394,28 @@ void *ht_get_ptr_nc(struct ht *ht, const char *key)
 	p = ht_get(ht, key, HT_PTR);
 	memcpy(&ret, &p, sizeof p);
 	return ret;
+}
+
+/**
+ * Get a function pointer entry from a hash table
+ *
+ * Errors reported via errno:
+ *
+ * EINVAL - Invalid arguments were supplied
+ * ENOENT - No entry found for the given key
+ * ERANGE - The item isn't a function pointer
+ *
+ * \param[in] ht  Hash table
+ * \param[in] key Key to find
+ * \return function pointer stored at \a key, or NULL on error
+ */
+void (*ht_get_fptr(struct ht *ht, const char *key))(void)
+{
+	void (**p)(void);
+
+	if ((p = (void (**)(void))ht_get(ht, key, HT_FPTR)))
+		return *p;
+	return NULL;
 }
 
 /**
@@ -458,6 +484,40 @@ int ht_set(struct ht *ht, const char *key, unsigned char type,
 }
 
 /**
+ * Iterate over the entries in a hash table
+ *
+ * \param[in]  ht    Hash table
+ * \param[in]  prev  Previous iterator value (initially zero)
+ * \param[out] key   Pointer for the key
+ * \param[out] value Pointer for the value
+ * \param[out] type  Pointer for the type (optional)
+ * \return an iterator value, or UINT_MAX on error.
+ *
+ * On error, errno will be set to ENOENT if there are no further entries,
+ * and EINVAL if given invalid arguments.
+ *
+ * The returned pointers must not be modified.
+ */
+unsigned ht_next(struct ht *ht, unsigned prev, const char **key,
+            const void **value, unsigned char *type)
+{
+	if (!ht || !key || !value) {
+		errno = EINVAL;
+		return UINT_MAX;
+	}
+
+	if (prev >= ht->capacity - 1) {
+		errno = ENOENT;
+		return UINT_MAX;
+	}
+
+	*key   = ht->e[++prev].k;
+	*value = ht->e[prev].v.p;
+	if (type) *type = ht->e[prev].t;
+	return prev;
+}
+
+/**
  * Destroy a hash table
  *
  * \param[in] ht Hash table
@@ -467,10 +527,13 @@ void ht_free(struct ht *ht)
 	unsigned int i;
 	if (!ht) return;
 
-	if (!(ht->flags & HT_STATIC_KEYS)) {
-		for (i = 0; i < ht->capacity; i++)
+	for (i = 0; i < ht->capacity; i++) {
+		if (!(ht->flags & HT_STATIC_KEYS))
 			free(ht->e[i].k);
+		if (ht->e[i].t == HT_STR)
+			free(ht->e[i].v.nc);
 	}
+
 	free(ht->e);
 	free(ht);
 }

@@ -20,8 +20,9 @@
  */
 #define HT_LONG 0 /**< A long int               */
 #define HT_STR  1 /**< A string (copied on set) */
-#define HT_PTR  2 /**< A pointer                */
-#define HT_MAX  HT_PTR
+#define HT_PTR  2 /**< A data pointer           */
+#define HT_FPTR 3 /**< A function pointer       */
+#define HT_MAX  HT_FPTR
 
 /**
  * Defaults for ht_alloc()
@@ -71,7 +72,7 @@ unsigned long ht_get_long(struct ht *ht, const char *key);
  * \param[in] key Key to find
  * \return a pointer to the string stored at \a key, or NULL on error
  */
-const void *ht_get_str(struct ht *ht, const char *key);
+const char *ht_get_str(struct ht *ht, const char *key);
 
 /**
  * Get a pointer entry from a hash table
@@ -108,6 +109,21 @@ const void *ht_get_ptr(struct ht *ht, const char *key);
 void *ht_get_ptr_nc(struct ht *ht, const char *key);
 
 /**
+ * Get a function pointer entry from a hash table
+ *
+ * Errors reported via errno:
+ *
+ * EINVAL - Invalid arguments were supplied
+ * ENOENT - No entry found for the given key
+ * ERANGE - The item isn't a function pointer
+ *
+ * \param[in] ht  Hash table
+ * \param[in] key Key to find
+ * \return function pointer stored at \a key, or NULL on error
+ */
+void (*ht_get_fptr(struct ht *ht, const char *key))(void);
+
+/**
  * Remove an entry from a hash table
  *
  * Returns the following errors:
@@ -132,6 +148,24 @@ int ht_rm(struct ht *ht, const char *key);
  */
 int ht_set(struct ht *ht, const char *key, unsigned char type,
            const void *in);
+
+/**
+ * Iterate over the entries in a hash table
+ *
+ * \param[in]  ht    Hash table
+ * \param[in]  prev  Previous iterator value (initially zero)
+ * \param[out] key   Pointer for the key
+ * \param[out] value Pointer for the value
+ * \param[out] type  Pointer for the type (optional)
+ * \return an iterator value, or UINT_MAX on error.
+ *
+ * On error, errno will be set to ENOENT if there are no further entries,
+ * and EINVAL if given invalid arguments.
+ *
+ * The returned pointers must not be modified.
+ */
+unsigned ht_next(struct ht *ht, unsigned prev, const char **key,
+                 const void **value, unsigned char *type);
 
 /**
  * Destroy a hash table

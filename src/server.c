@@ -12,9 +12,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
-#include <getopt.h>
 #include <limits.h>
 #include <signal.h>
+#include <locale.h>
 #include <time.h>
 #include <fcntl.h>
 #include <arpa/inet.h>
@@ -33,8 +33,12 @@
 
 /* service handles */
 unsigned long rtp_service;
+unsigned long http_service;
 
-unsigned short voice_port  = 5002;
+unsigned short pt_port    = 5001;
+unsigned short voice_port = 5002;
+unsigned short http_port  = 80;
+const char *external_ip   = "127.0.0.1";
 struct sockaddr_in server_addr;
 
 static unsigned timeout    = 120; /**< seconds */
@@ -45,6 +49,7 @@ struct ht *uid_to_context; /**< uid -> context for logged in users */
 void *db_w;
 
 extern struct service_ops rtp_service_ops;
+extern struct service_ops http_service_ops;
 
 static void sighandler(int sig)
 {
@@ -196,12 +201,14 @@ int main(int argc, char *argv[])
 {
 	int c;
 	unsigned long i;
+	struct in_addr x;
 
 	signal(SIGINT, sighandler);
 	signal(SIGTERM, sighandler);
 	signal(SIGCHLD, SIG_IGN);
 	signal(SIGPIPE, SIG_IGN);
 	srand(time(NULL));
+	setlocale(LC_ALL, "C");
 
 	got_sig = 0;
 	memset(&server_addr, 0, sizeof(struct sockaddr_in));
@@ -209,7 +216,7 @@ int main(int argc, char *argv[])
 	server_addr.sin_port        = htons(5001);
 	server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-	while ((c = getopt(argc, argv, ":hd:p:m:s:t:")) != -1) {
+	while ((c = getopt(argc, argv, "hd:p:m:s:t:x:")) != -1) {
 		switch (c) {
 		case 'h': /* [h]elp */
 			goto usage;
@@ -222,7 +229,8 @@ int main(int argc, char *argv[])
 				goto err;
 			}
 
-			voice_port    = i + 1;
+			pt_port    = i;
+			voice_port = i + 1;
 			server_addr.sin_port = htons(i);
 			break;
 		case 'm': /* [m]axconn */
@@ -243,17 +251,24 @@ int main(int argc, char *argv[])
 			if ((i = strtoul(optarg, NULL, 10)) < UINT_MAX)
 				timeout = (unsigned)i;
 			break;
-		case ':': /* Missing required argument */
-			ERROR(("Option -%c requires an argument", optopt));
-			goto usage;
-		case '?': /* Option argument not in opt string */
-			ERROR(("Unknown option -%c", optopt));
+		case 'x': /* e[x]ternal ip */
+			if (!inet_pton(AF_INET, optarg, &x)) {
+				ERROR(("Invalid value for external ip: %s", optarg));
+				goto err;
+			}
+			external_ip = optarg;
+			break;
+		case '?': /* Option argument not in opt string (or arg required) */
 			goto usage;
 		}
 	}
 
-	/* Start the RTP service */
-	if ((rtp_service = service_start(&rtp_service_ops)) == ULONG_MAX)
+	if (geteuid())
+		http_port = pt_port + 2;
+
+	/* Start services */
+	if ((rtp_service  = service_start(&rtp_service_ops))  == ULONG_MAX ||
+	    (http_service = service_start(&http_service_ops)) == ULONG_MAX)
 		goto err;
 
 	if (net_conn(NULL, &server_ops, (struct sockaddr *)&server_addr,
@@ -275,21 +290,23 @@ int main(int argc, char *argv[])
 		service_recv(rtp_service);
 	}
 
+err:
 	INFO(("Shutting down..."));
 	for (i = 0; i < max_conn; i++)
 		net_close(i);
 
-err:
 	db_close(db_w);
 	ht_free(uid_to_context);
 	return !got_sig;
 
 usage:
 	printf("Usage: %s [-h] [-d database_file] [-p port] [-m max_connections] "
-	       "[-s server_ip] [-t connection_timeout]\n\n", argv[0]);
-	printf("The defaults are: -d ptserver.db -p 5001 -m %u -s 0.0.0.0 -t 120\n\n", MAX_CONN);
+	       "[-s server_ip] [-t connection_timeout] [-x external_ip]\n\n", argv[0]);
+	printf("The defaults are: -d ptserver.db -p 5001 -m %u -s 0.0.0.0 -t 120 -x 127.0.0.1\n\n", MAX_CONN);
 	puts("Note: the argument given for -m may be constrained by resource limits.");
-	puts("Also, the ports used for voice rx/tx will be port + 1 and port + 2 respectively.");
+	puts("Also, the port used for room audio will be port + 1.");
+	puts("The port for HTTP will be port + 2 for non-root users.");
+	puts("external_ip is the IPv4 address the client should connect to.");
 	return 0;
 }
 

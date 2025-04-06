@@ -517,7 +517,7 @@ static void rtp_service_start(void)
 	unsigned i, j, rs;
 	struct rtp_stream *s;
 
-	INFO(("RTP service starting"));
+	INFO(("RTP service starting (pid %ld)", getpid()));
 	rid_to_stream = ht_alloc(HT_VALUE_DEFAULT, 0);
 	server_addr.sin_port = htons(voice_port);
 	if (net_conn(NULL, &rtp_ops, (struct sockaddr *)&server_addr,

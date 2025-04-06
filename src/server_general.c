@@ -1030,6 +1030,7 @@ void general_flow(struct pt_context *ctx)
 		 * room autojoin.
 		 */
 	case PACKET_NEW_CHECKSUMS:
+	case PACKET_PT5_CHECKSUMS:
 	case PACKET_CHECKSUMS:
 		/**
 		 * Sent in response to PACKET_USER_DATA
