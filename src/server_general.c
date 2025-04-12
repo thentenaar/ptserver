@@ -663,10 +663,8 @@ void general_flow(struct pt_context *ctx)
 			ignore(ctx, id, id2, ctx->pkt_in.data[8] | ctx->pkt_in.data[9]);
 		break;
 	case PACKET_GET_MY_ROOM_INFO:
-		if (!(s = get_my_room_info(ctx->uid))) {
-			send_return_code(ctx, 'x', no_room_yet, NO_ROOM_YET_LEN);
+		if (!(s = get_my_room_info(ctx->uid)))
 			break;
-		}
 
 		send_packet(ctx, new_packet(PACKET_MY_ROOM_INFO, strlen(s), s, 0));
 		break;
