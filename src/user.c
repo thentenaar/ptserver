@@ -388,7 +388,7 @@ int register_user(void *db_w, struct user *u)
 			"INSERT INTO users(nickname, email, first, last, privacy, "
 			"verified, random, paid1, get_offers_from_us, "
 			"get_offers_from_affiliates, banners, admin, sup, color, created) "
-			"VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now','subsec')) "
+			"VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now','subsec')) "
 			"RETURNING uid");
 
 		if (!insert_user)
@@ -408,6 +408,9 @@ int register_user(void *db_w, struct user *u)
 		++ret;
 	else ERROR(("register_user: insert failed: %s", db_errmsg(db_w)));
 	db_reset_prepared(insert_user);
+
+	if (ret)
+		INFO(("Registered user %s (%s) as %lu", u->nickname, u->email, u->uid));
 
 ret:
 	return ret;
@@ -510,14 +513,15 @@ char *search_users(void *db_r, const char *field, const char *partial)
 	int e = 0;
 	char *buf, *sql = NULL, *s = NULL;
 
-	if (!db_r || !field || !partial || !(buf = calloc(strlen(field) + 64, 1)))
+	if (!db_r || !field || !partial || !(buf = calloc(strlen(field) + 128, 1)))
 		return NULL;
 
 	/* 'p' for prefix, 'x' for exact */
 	if ((e = ((*field == 'p') << 1) | (*field == 'x')))
 		field++;
 
-	sprintf(buf, "SELECT uid,nickname,first,last,email FROM users WHERE %s LIKE ?", field);
+	sprintf(buf, "SELECT uid,nickname,first,last,email FROM users "
+	             "WHERE uid > 1 AND uid < 0x7fff AND %s LIKE ?", field);
 	if (!(p = db_prepare(db_r, buf))) {
 		free(buf);
 		return NULL;
