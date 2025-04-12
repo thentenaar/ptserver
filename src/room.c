@@ -128,7 +128,7 @@ static const char * const rooms_fmt[7] = {
 /**
  * Admins can see all users in a room, even if they join as invisible
  */
-static const char * const room_user_fmt[] = {
+static const char * const room_user_fmt[4] = {
 	"SELECT id AS group_id, room_users.uid AS uid, req, mic, pub, away, "
 	"room_users.admin AS admin, room_users.host AS host, nickname, "
 	"first, last, color "
@@ -199,8 +199,8 @@ char *room_counts_by_category(void *db_w)
 	sprintf(buf, /* The two virtual categories will have up to 5 entries */
 			"SELECT %d AS id, (SELECT MIN(5, COUNT(DISTINCT id)) FROM rooms WHERE p=0) AS '#' UNION "
 			"SELECT %d AS id, (SELECT MIN(5, COUNT(DISTINCT id)) FROM rooms WHERE p=0) AS '#' UNION "
-			"SELECT catg AS id, COUNT(*) AS '#' FROM rooms WHERE p=0 AND catg NOT IN (%d,%d) GROUP BY catg",
-			CATEGORY_TOP, CATEGORY_FEATURED, CATEGORY_TOP, CATEGORY_FEATURED);
+			"SELECT catg AS id, COUNT(*) AS '#' FROM rooms WHERE p=0 AND catg NOT IN (%d,%d,%d) GROUP BY catg",
+			CATEGORY_TOP, CATEGORY_FEATURED, CATEGORY_TOP, CATEGORY_FEATURED, CATEGORY_EPHEMERAL);
 
 	if (!db_exec(db_w, &s, buf, db_row_to_record) && s)
 		return s;
@@ -217,6 +217,9 @@ char *rooms_for_category(void *db_r, unsigned long protocol_version,
 {
 	char buf[256], *s = NULL;
 	unsigned idx = ((catid == CATEGORY_FEATURED) << 1) | (catid == CATEGORY_TOP);
+
+	if (catid == CATEGORY_EPHEMERAL)
+		return NULL;
 
 	if (protocol_version >= PROTOCOL_VERSION_82 && !idx) {
 		sprintf(buf, rooms_fmt[4], catid);
@@ -242,6 +245,9 @@ char *rooms_and_subcategories_for_category(void *db_w, unsigned long catid)
 {
 	char buf[256], *s = NULL;
 
+	if (catid == CATEGORY_EPHEMERAL)
+		return NULL;
+
 	sprintf(buf, rooms_fmt[6], catid);
 	if (db_exec(db_w, &s, buf, db_row_to_record)) {
 		free(s);
@@ -265,6 +271,9 @@ char *rooms_and_subcategories_for_category(void *db_w, unsigned long catid)
 char *rooms_for_subcategory(void *db_w, unsigned long catid, unsigned long scid)
 {
 	char buf[256], *s = NULL;
+
+	if (catid == CATEGORY_EPHEMERAL)
+		return NULL;
 
 	sprintf(buf, rooms_fmt[5], catid, scid);
 	if (db_exec(db_w, &s, buf, db_row_to_record)) {
@@ -503,7 +512,7 @@ ret:
 int room_user_ignores_me(struct pt_context *ctx, unsigned long rid, unsigned long uid)
 {
 	if (!ignores_me) {
-		reddot_text_query = db_prepare(
+		ignores_me = db_prepare(
 			db_w,
 			"SELECT COUNT(*) FROM room_ignore WHERE id=? AND uid=? AND target=?"
 		);
@@ -546,7 +555,7 @@ void send_room_message(struct pt_context *ctx, struct pt_context *target,
 	 * non-admins
 	 */
 	admin = from && (from == UID_PALTALK_NOTIFIER || user_is_room_admin(rid, from));
-	if (from && !admin && !db_get_int(reddot_text_query))
+	if (from && !admin && !!db_get_int(reddot_text_query))
 		return;
 
 	if (!(buf = malloc(len + 8)))
@@ -581,8 +590,8 @@ char *get_my_room_info(unsigned long uid)
 		my_room = db_prepare(
 			db_w,
 			"SELECT nm AS name, r AS rating, catg, "
-			"COALESCE(subcatg, 0) AS subcatg, max, "
-			"(CASE lock WHEN 0 THEN 'N' ELSE 'Y' END) AS lock, "
+			"COALESCE(subcatg, 0) AS subcatg, size AS max, "
+			"(CASE l WHEN 0 THEN 'N' ELSE 'Y' END) AS lock, "
 			"intro FROM rooms WHERE owner=? AND p=0 ORDER BY id LIMIT 1"
 		);
 	}
@@ -817,7 +826,7 @@ static int join_room_cb(void *userdata, int cols, char *val[], char *col[])
 	/* Admins / Owners can bypass the lock password */
 	admin = ctx->user.admin || (val[5] && ctx->uid == strtoul(val[5], NULL, 10))
 	                        || (val[8] && *val[8] == '1');
-	if (!admin && val[9] && *val[9] == '1' && !strtoul(val[4], NULL, 10)) {
+	if (!admin && val[9] && *val[9] == '1' && strtoul(val[4], NULL, 10)) {
 		send_return_code(ctx, 1, invalid_password, INVALID_PASSWORD_LEN);
 		return -1;
 	}
@@ -905,7 +914,7 @@ void join(struct pt_context *ctx, unsigned long rid, unsigned long code,
 			"premium=%u\\ncodec=%s\\nqual=%u\\nchannels=%u\\nowner=%s\\n"
 			"', r, nm, size, premium, codec, qual, channels, "
 			"(SELECT nickname FROM users WHERE uid=owner)), '\\n', "
-			"CHAR(10)) AS data, (code == ?), "
+			"CHAR(10)) AS data, (code IS NOT NULL AND code == ?), "
 			"(password IS NULL OR password == ?), ?, "
 			"CONCAT(channels, CHAR(10), codec, CHAR(10), qual, CHAR(10), ?) "
 			"FROM rooms WHERE id=?"
@@ -1998,11 +2007,11 @@ int room_command(struct pt_context *ctx, unsigned long rid, const char *buf)
 		whisper(ctx, rid, cmd, strtok(NULL, "<"));
 		++ret;
 		break;
-	}
-
-	if (!ret) {
+	case '?':
 		msg = room_cmds[user_is_room_admin(rid, ctx->uid)];
 		send_room_message(ctx, ctx, rid, 0, strlen(msg), msg);
+		++ret;
+		break;
 	}
 
 ret:

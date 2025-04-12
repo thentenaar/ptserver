@@ -538,8 +538,10 @@ int ft_xfer_accept(struct pt_context *sender, struct pt_context *recipient)
 		state->status[1] = STATUS_CONNECT;
 	}
 
-	if (ft_pipe(state))
+	if (ft_pipe(state)) {
+		free(state);
 		return -1;
+	}
 
 	if (recipient->protocol_version >= PROTOCOL_VERSION_70) {
 		buf[0] = (sender->uid >> 24) & 0xff;

@@ -331,11 +331,12 @@ static void rtp_read(void *ctx, unsigned long conn, int fd)
 	}
 
 	codec = c->stream->codec;
-	if (c->pv <= PROTOCOL_VERSION_70)
+	if (c->pv <= PROTOCOL_VERSION_70 && c->stream->gsm)
 		codec = c->stream->gsm;
 	net_set_timeout(conn, 0);
 
-	if (pkt_size < RTP_HEADERSZ + 4 + codec->frame_size * FRAMES_PKT ||
+	if (!codec ||
+	    pkt_size < RTP_HEADERSZ + 4 + codec->frame_size * FRAMES_PKT ||
 	    pkt_size > RTP_HEADERSZ + 6 + codec->frame_size * FRAMES_PKT)
 		goto err;
 
@@ -435,7 +436,7 @@ done:
 
 static void rtp_close(void *ctx, unsigned long conn, int fd)
 {
-	char buf[32];
+	char buf[16];
 	struct rtp_ctx *c = ctx;
 
 	(void)conn;
@@ -651,7 +652,8 @@ void rtpctl(unsigned char msg, unsigned long rid, unsigned long uid,
  */
 static void rtp_child_read(int fd)
 {
-	char buf[32], *data = NULL, cmd, *codec, *s;
+	char buf[32], cmd, *codec, *s;
+	unsigned char *data = NULL;
 	unsigned long channels, pv, len, rid, uid, qual;
 	struct rtp_ctx *c;
 	struct rtp_stream *stream;
@@ -661,7 +663,7 @@ static void rtp_child_read(int fd)
 		stream = NULL;
 		recv(fd, buf, 4, 0);
 
-		if (!(len = (buf[0] << 24) | (buf[1]  << 16) | (buf[2]  << 8) | buf[3]))
+		if (!(len = ((unsigned)buf[0] << 24) | ((unsigned)buf[1] << 16) | ((unsigned)buf[2] << 8) | (unsigned)buf[3]))
 			goto next;
 
 		if (!(data = calloc(1, len)))
@@ -683,8 +685,8 @@ static void rtp_child_read(int fd)
 
 		switch (cmd) {
 		case RTP_JOIN: /* User joined */
-			codec    = strchr(data + 9, '\n') + 1;
-			channels = strtoul(data + 9, NULL, 10);
+			codec    = strchr((const char *)data + 9, '\n') + 1;
+			channels = strtoul((const char *)data + 9, NULL, 10);
 			s        = strchr(codec, '\n');
 			*s++     = '\0';
 			qual     = strtoul(s, NULL, 10);

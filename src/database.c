@@ -143,6 +143,7 @@ static const char * const schema[] = {
 "INSERT INTO categories VALUES(0x761a, 0, \"Music\");",
 "INSERT INTO categories VALUES(0x761b, 0, \"Miscellaneous\");",
 "INSERT INTO categories VALUES(0x761c, 0, \"Adult Oriented\");",
+"INSERT INTO categories VALUES(0x7fff, 0, \"Ephemeral Rooms\");",
 
 "CREATE TABLE rooms("
 "	id           INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -163,7 +164,7 @@ static const char * const schema[] = {
 "	topic_setter INTEGER REFERENCES users,"
 "	intro        TEXT,"
 "	owner        INTEGER REFERENCES users,"            /* PT 9+: Room owner's nickname */
-"	code         INT DEFAULT 0,"                       /* admin code */
+"	code         INT,"                                 /* admin code */
 "	size         INT DEFAULT 15,"                      /* PT 7+: max occupancy */
 "	premium      INT DEFAULT 0,"                       /* PT 7+: Non-zero if created by a premium user? */
 "	codec        TEXT NOT NULL DEFAULT 'gsmproj.dll'," /* PT 8+: Audio codec for the room */

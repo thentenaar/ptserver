@@ -42,10 +42,11 @@
 /**
  * Virtual Categories (hardcoded in PT 7+)
  */
-#define ALL_CATEGORIES    0xffff
-#define CATEGORY_TOP      0x7530 /* PT 7 - 9.1: Top Rooms    */
-#define CATEGORY_FEATURED 0x7594 /* PT 7+: Featured Rooms     */
-#define CATEGORY_SCRADIO  0x7d0a /* PT 10.2: SHOUTcast Radio */
+#define ALL_CATEGORIES     0xffff
+#define CATEGORY_TOP       0x7530 /* PT 7 - 9.1: Top Rooms    */
+#define CATEGORY_FEATURED  0x7594 /* PT 7+: Featured Rooms     */
+#define CATEGORY_SCRADIO   0x7d0a /* PT 10.2: SHOUTcast Radio */
+#define CATEGORY_EPHEMERAL 0x7fff
 
 /**
  * Status words
@@ -197,10 +198,6 @@
 #define PACKET_ROOM_GET_ADMIN_INFO      0xfc7c
 //#define 0xfc98 /* PT 11.8: "RemoveVgift" TODO: investigate */
 //#define 0xfc9a /* PT 11.8: "SendVgift" TODO: investigate */
-//#define 0xfd30 /* PT5+: "VideoHangup" data: uid (4 bytes) */
-#define PACKET_ACCEPT_VIDEO_CALL        0xfd3a /* data: uid, port (2 bytes) */
-#define PACKET_DECLINE_VIDEO_CALL       0xfd43 /* data: uid */
-#define PACKET_START_PRIVATE_VIDEO      0xfd44 /* data: uid, port */
 //#define 0xfd58 /* PT 5.0,9.0+: Unknown 0-length TODO: investigate 11.8: "sendOnlineSearchRequest" */
 //#define 0xfd65 /* PT 10.2+: "SendEpsilonFunc" TODO: investigate */
 //#define 0xfd6a /* PT 9.0+: "TypeAhead" data: 4 bytes, 2 bytes  TODO: investigate */
@@ -222,22 +219,22 @@
 #define PACKET_SET_PRIVACY              0xfe66 /* Set Privacy Setting (A [all users can contact me]/T [transfers from buddies only]/P [contact from buddy list only]) data: one byte */
 //#define 0xfe67 /* PT 11.8: Haven't seen it used, but it is mentioned in the id-to-name function as "MyInfoReload" */
 //#define 0xfe6d /* PT 9.0+: Unknown TODO: investigate 11.8: "SuperIMRemoveMember" */
-//#define 0xfe6e /* PT 9.0+: Unknown TODO: investigate 11.8: "SuerIMGamesMode" */
+//#define 0xfe6e /* PT 9+: "SuperIMGamesMode" data: uid 00 01 (on/off) */
 #define PACKET_ROOM_HAND_DOWN           0xfe71 /* data: room id */
 #define PACKET_ROOM_HAND_UP             0xfe72 /* data: room id */
 #define PACKET_ROOM_UNREDDOT_USER       0xfe73
 #define PACKET_ROOM_IGNORE_USER         0xfe74 /* Ignore user in room. Data: room_id, target_uid, 00 00 - unignore, 00 01 - ignore */
 //#define 0xfe76 /* PT 9.0+: Send SuperIM Request TODO: investigate 11.8: "SuperImInclude" */
 //#define 0xfe77 /* PT 9.0+: TODO: investigate 11.8: "GroupConvertToVoice" */
-//#define 0xfe78 /* PT 9.0+: Create SuperIM? Unknown TODO: investigate 11.8: "ImConvertToPrivateGroup" */
+//#define 0xfe78 /* PT 9+: "ImConvertToPrivateGroup" Enable Audio in Super IM data: uid 00 01 */
 //#define 0xfe79 /* PT 10.2+: "GroupConvertToNoVoice" TODO: investigate */
 #define PACKET_ROOM_BOUNCE_REASON       0xfe7a /* data: room_id, uid, BR: reason */
 #define PACKET_ROOM_MUTE                0xfe81 /* PT7+ Mute/Unmute the room data: room_id, 00 00 - mute, 00 01 - unmute */
 #define PACKET_ROOM_LOWER_ALL_HANDS     0xfe82
 #define PACKET_ROOM_REDDOT_USER         0xfe83
 #define PACKET_ROOM_BOUNCE_USER         0xfe84
-//#define 0xfe8a /* PT 11.8: "SoundConnectionLostOnClientSide" TODO: investigate */
-#define PACKET_ROOM_GRANT_ADMIN         0xfe8e /* PT 5+: "AssignCoAdmin" Grant room admin to a user. data: room id, user id (4 bytes) TODO: is this used? */
+//#define 0xfe8a /* PT 10.2+: "SoundConnectionLostOnClientSide" TODO: investigate */
+#define PACKET_ROOM_GRANT_ADMIN         0xfe8e /* PT 5+: "AssignCoAdmin" Grant room admin to a user. data: room id, user id (4 bytes) */
 #define PACKET_ROOM_INVITE_OUT          0xfe98 /* data: room_id, uid */
 //#define 0xfe99 /* PT 10.2+: "GroupWebEnableSuperIm" TODO: investigate */
 //#define 0xfe9a /* PT 10.2+: "GroupCreateEmptySuperIm" TODO: investigate */
@@ -259,7 +256,7 @@
 #define PACKET_JOIN_FAVORITE_ROOM       0xfec9 /* data: k=v fields: aff=1\nname=str\ninvis=0|1\nport=2090\nlock=str (PT9 (not in 10): +email, +origin) */
 #define PACKET_ROOM_JOIN                0xfeca /* data: room_id, join_as_invisible (16 bits, 0|1), 0000082a (constant), options string? */
 #define PACKET_ROOM_REPORT_USER         0xfecf /* "Send911" data: room_id, uid, complaint text */
-#define PACKET_ROOM_PRIVATE_INVITE      0xfed2 /* PT 7+: Replaces PT5 p2p functionality. data: 00 01 0000082a (constant) 00 01 uid */
+#define PACKET_ROOM_PRIVATE_INVITE      0xfed2 /* PT 7+: Replaces PT5 p2p functionality. data: 00 01 0000082a (constant) n_uids (2 bytes) uids */
 //#define 0xfefb /* PT 11.8: "GetMultimediaResource" TODO: investigate */
 //#define 0xfefc /* PT 10.2: TODO: investigate (not in 11?) */
 #define PACKET_SEND_INVITE              0xff38 /* body is email=email@host.tld \n origin=255 */
@@ -510,7 +507,7 @@
 
 /* client -> server */
 #define PACKET_PT5_BANNER_COUNTERS      0xf448
-#define PACKET_PT5_ROOM_GAME_REQUEST    0xf632 /** PT 5: [Room] View/Play game.
+#define PACKET_PT5_ROOM_GAME_REQUEST    0xf632 /** [Room] View/Play game.
                                                    data: room_id (32-bits),
                                                    game_id (16 bits):
                                                      00 01 - cards
@@ -520,21 +517,25 @@
                                                      00 01 - play
                                                */
 #define PACKET_PT5_EMAIL_VERIFY         0xf768 /* data: 00 01 <verification_code> */
-#define PACKET_PT5_CHECKSUMS            0xf7b7 /* PT 5.0: Older version of CHECKSUMS? */
+#define PACKET_PT5_CHECKSUMS            0xf7b7 /* Older version of CHECKSUMS? */
 //#define 0xfa7e /* PT 5.0: Unknown data: string (PC-to-Phone registration?) */
 //#define 0xfb1e /* PT 5.0: Unknown data: 4 bytes, 4 bytes TODO: investigate */
 #define PACKET_PT5_C_DRIVE_SERIAL       0xfb37 /* data: [response to 0x04c9] drive C volume serial (variant 1 encoded) */
 #define PACKET_PT5_REGISTRATION         0xfb6e
-#define PACKET_PT5_START_VOICE_CALL     0xfe3e /* "sendRinger" data: uid_other_end port (network order) */
-#define PACKET_PT5_ACCEPT_VOICE_CALL    0xfe3f /* "sendPickup" data: uid_other_end */
-#define PACKET_PT5_HANGUP_VOICE_CALL    0xfe40 /* "sendHangup" data: uid_other_end */
+#define PACKET_DCC_VIDEO_HANGUP         0xfd30 /* "VideoHangup" data: uid (4 bytes) */
+#define PACKET_DCC_VIDEO_ACCEPT         0xfd3a /* data: uid, port (2 bytes) */
+#define PACKET_DCC_VIDEO_REJECT         0xfd43 /* data: uid */
+#define PACKET_DCC_VIDEO_INIT           0xfd44 /* data: uid, port */
+#define PACKET_DCC_VOICE_INIT           0xfe3e /* "sendRinger" data: uid_other_end port (network order) */
+#define PACKET_DCC_VOICE_ACCEPT         0xfe3f /* "sendPickup" data: uid_other_end */
+#define PACKET_DCC_VOICE_HANGUP         0xfe40 /* "sendHangup" data: uid_other_end */
 #define PACKET_DCC_XFER_INIT            0xfe43
 #define PACKET_DCC_XFER_ACCEPT          0xfe44
 #define PACKET_DCC_XFER_REJECT          0xfe45
-#define PACKET_PT5_DECLINE_VOICE_CALL   0xfec3 /* data: uid_other_end */
-#define PACKET_ROOM_CREATE              0xfed4 /* PT 5: Create a room data: flags: 00 00 - no voice or private, 01 - private&voice, 03 - voice, 05 - private, category_id, 0000082a (constant), rating room_name \n password */
-#define PACKET_PT5_PING                 0xff60 /* PT 5: "sendPing" sent on a 1/minute timer (0x7e9) from room_dialog. 0-length */
-#define PACKET_INTRODUCE_UID            0xff9c /* PT 5: "introduceUid" data: uid */
+#define PACKET_DCC_VOICE_REJECT         0xfec3 /* data: uid_other_end */
+#define PACKET_ROOM_CREATE              0xfed4 /* Create a room data: flags: 00 00 - no voice or private, 01 - private&voice, 03 - voice, 05 - private, category_id, 0000082a (constant), rating room_name \n password */
+#define PACKET_PT5_PING                 0xff60 /* "sendPing" sent on a 1/minute timer (0x7e9) from room_dialog. 0-length */
+#define PACKET_INTRODUCE_UID            0xff9c /* "introduceUid" data: uid */
 
 /* server -> client */
 #define PACKET_PT5_INVITE_STATUS        0x00c8 /* Status of sent invites. 0xc8 delimited list of email= status= */
@@ -544,23 +545,23 @@
 //#define 0x014e /* PT 5.1: Unknown [Room list related] TODO: investigate */
 #define PACKET_PT5_ROOM_ADMIN_GRANTED   0x0172 /* Reply to 0xfe8e data: room_id */
 #define PACKET_PT5_ROOM_ADMIN_STATUS    0x0174 /* Similar effect to 0x0172 {room_id, my_uid, on} data: room_id, uid, 0000 - off 0001 - on */
-//#define 0x01a4 /* PT 5: Unknown: TODO: investigate */
+//#define 0x01a4 /* PT 5: data: 2 bytes, string [Sets the text of a room list dialog item to the given string] TODO: investigate */
 #define PACKET_DCC_XFER_REJECTED        0x01bb
 #define PACKET_DCC_XFER_ACCEPTED        0x01bc
 #define PACKET_DCC_XFER_REQUEST         0x01bd
-#define PACKET_PT5_VOICE_CALL_REJECT    0x01c0
-#define PACKET_PT5_VOICE_CONN_INFO      0x01c1
-#define PACKET_PT5_VOICE_CALL_INVITE    0x01c2
-#define PACKET_PT5_VOICE_CALL_HANGUP    0x01c3 /* handled same as 0x01c0 */
-#define PACKET_PT5_VIDEO_CALL_INVITE    0x02bc /* data: same as 0x01c2 */
-#define PACKET_PT5_VIDEO_CALL_DECLINED  0x02bd /* TODO: investigate */
-#define PACKET_PT5_VIDEO_CONN_INFO      0x02c6 /* TODO: dword, dword, word investigate */
-#define PACKET_PT5_VIDEO_CALL_HANGUP    0x02d0 /* TODO: investigate */
+#define PACKET_DCC_VOICE_REJECTED       0x01c0 /* handled same as 0x01c3 */
+#define PACKET_DCC_VOICE_ACCEPTED       0x01c1 /* data: uid, ip, port */
+#define PACKET_DCC_VOICE_REQUEST        0x01c2
+#define PACKET_DCC_VOICE_HUNGUP         0x01c3 /* data: uid */
+#define PACKET_DCC_VIDEO_REQUEST        0x02bc /* data: same as 0x01c2 */
+#define PACKET_DCC_VIDEO_REJECTED       0x02bd /* handled same as 0x02d0 */
+#define PACKET_DCC_VIDEO_ACCEPTED       0x02c6 /* data: uid, ip, port */
+#define PACKET_DCC_VIDEO_HUNGUP         0x02d0 /* data: same as 0x01c3 */
 #define PACKET_PT5_SEND_C_DRIVE_SERIAL  0x04c9 /* data: 00 00 challenge_for_fb37 */
 #define PACKET_PT5_EMAIL_CONFIRM        0x0898 /* Display email confirmation code dialog */
 //#define 0x17f2 /* PT5: data: 4 bytes, ignored */
 #define PACKET_PT5_E7FA                 0xe7fa /* PT5: Unknown 0-length TODO: investigate */
-#define PACKET_PT5_SEND_LOGIN           0xffb1 /* PT 5: Causes PACKET_LOGIN to be sent (same payload as PACKET_CHALLENGE) */
+#define PACKET_PT5_SEND_LOGIN           0xffb1 /* Causes PACKET_LOGIN to be sent (same payload as PACKET_CHALLENGE) */
 
 void each_field(char *s, void *ud, void (*cb)(void *ud, unsigned i, const char *line));
 void each_field_kv(char *s, void *ud, void (*cb)(void *ud, const char *k, const char *v));
