@@ -283,7 +283,7 @@ void registration_flow(struct pt_context *ctx)
 		 * going back into the login flow after registration. They
 		 * _really_ didn't want to miss it...
 		 */
-		if (strstr(ctx->pkt_in.data, "&success=1"))
+		if (strstr(ctx->pkt_in.data, "&success=1") || strstr(ctx->pkt_in.data, "&success82=1"))
 			transition_fro(ctx);
 		break;
 
