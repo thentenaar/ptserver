@@ -261,7 +261,7 @@
 //#define 0xfefc /* PT 10.2: TODO: investigate (not in 11?) */
 #define PACKET_SEND_INVITE              0xff38 /* body is email=email@host.tld \n origin=255 */
 //#define 0xff4c /* PT 10.2: TODO: investigate (not in 11?) */
-#define PACKET_SET_BUDDY_DISPLAY_NAME   0xff59 /* Set a display name for a user data: uin (32 bits), displayname */
+#define PACKET_SET_BUDDY_DISPLAY        0xff59 /* Set a display name for a user data: uin (32 bits), displayname */
 #define PACKET_PING                     0xff5e /* PT 9.1+: Sent every 5 seconds after login. data: timestamp 32-bits. */
 //#define 0xff68 /* PT 9.1+: Unknown TODO: investigate 11.8: "ProfilePicChanged" */
 #define PACKET_NUDGE_OUT                0xff7b /* PT8/9.0 data: uin (32 bits), 00 00 00 00, nudge_type (32 bits) [1=car horn, 2=fog horn, 3=monkey] */
@@ -452,7 +452,7 @@
 //#define 0xe7ff /* PT8+: Unknown TODO: investigate */
 #define PACKET_INVITE_BOTHER            0xfe4f /* [PT 8 - 10.2] TODO: investigate (no data) */
 #define PACKET_EMAIL_BOTHER             0xfe50 /* [PT 7 - 10.2] Bother the user to confirm their email (Shows the email confirmation dialog) TODO: investigate data */
-#define PACKET_SET_DISPLAYNAME          0xfe59 /* Set a display name for a user. data: uid name */
+#define PACKET_SET_DISPLAY              0xfe59 /* TODO: Is this used? Set a display name for a user. data: uid name */
 #define PACKET_TIME_WRONG               0xff60 /* PT 9.1+: Server sends this if the PING time is off */
 //#define 0xfe67 /* PT 10.2+: Unknown TODO: investigate */
 #define PACKET_REDIRECT                 0xff89

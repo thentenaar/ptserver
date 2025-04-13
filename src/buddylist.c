@@ -125,7 +125,7 @@ static struct pt_packet *mk_statuschange_json(unsigned long uid, unsigned long s
  */
 static struct pt_packet *mk_statuschange(struct pt_context *ctx, unsigned long uid, unsigned long status, unsigned crown, const char *msg)
 {
-	char buf[14 + STATUSMSG_MAX];
+	char buf[18 + STATUSMSG_MAX];
 	size_t msglen, len = 8;
 
 	if (ctx->uid != uid) {
@@ -142,6 +142,19 @@ static struct pt_packet *mk_statuschange(struct pt_context *ctx, unsigned long u
 			buf[9]  = 0x5d;
 			len    += 2;
 		}
+
+		/* TODO: 10.2 needs an additional word, long, and word */
+		if (ctx->protocol_version >= PROTOCOL_VERSION_102) {
+			buf[10] = 0x00;
+			buf[11] = 0x00;
+			buf[12] = 0x00;
+			buf[13] = 0x00;
+			buf[14] = 0x00;
+			buf[15] = 0x00;
+			buf[16] = 0x00;
+			buf[17] = 0x00;
+			len    += 8;
+		}
 	} else if (status == STATUS_OFFLINE)
 		return NULL;
 
@@ -154,7 +167,8 @@ static struct pt_packet *mk_statuschange(struct pt_context *ctx, unsigned long u
 	buf[6] = (status >> 8) & 0xff;
 	buf[7] = status & 0xff;
 
-	if (status != STATUS_ONLINE && ctx->protocol_version >= PROTOCOL_VERSION_82 && msg) {
+	if (((status != STATUS_ONLINE && ctx->protocol_version >= PROTOCOL_VERSION_82) ||
+	    ctx->protocol_version >= PROTOCOL_VERSION_102) && msg) {
 		msglen = min(STATUSMSG_MAX, strlen(msg));
 		memcpy(buf + len, msg, msglen);
 		len += msglen;
@@ -277,6 +291,9 @@ void set_buddy_display(struct pt_context *ctx, unsigned long uid, const char *di
 		if (!set_disp_name)
 			return;
 	}
+
+	if (disp && !strcmp(disp, "*default*"))
+		disp = NULL;
 
 	db_reset_prepared(set_disp_name);
 	db_bind(set_disp_name, "tii", disp, ctx->uid, uid);

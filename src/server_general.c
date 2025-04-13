@@ -306,6 +306,10 @@ void general_flow(struct pt_context *ctx)
 		 * 'A' - All users can contact me
 		 * 'T' - Only buddies can send me file transfers
 		 * 'P' - Only buddies can contact me
+		 *
+		 * 10.2 adds a second byte:
+		 *
+		 * 'Y' / 'N' - Allow users to find me by email address
 		 */
 		buf[1] = '\0';
 		buf[0] = ctx->pkt_in.data[0];
@@ -316,8 +320,17 @@ void general_flow(struct pt_context *ctx)
 		user_set_privacy(db_w, ctx->uid, buf[0]);
 		/* FALLTHRU */
 	case PACKET_GET_PRIVACY:
+		/* 10.2 requires 2 bytes */
 		buf[0] = *ctx->user.privacy;
-		send_packet(ctx, new_packet(PACKET_VERIFY_PRIVACY, 1, buf, PACKET_F_COPY));
+		buf[1] = 'N'; /* Allow email search? */
+
+		send_packet(ctx,
+			new_packet(
+				PACKET_VERIFY_PRIVACY,
+				1 + (ctx->protocol_version >= PROTOCOL_VERSION_102),
+				buf, PACKET_F_COPY
+			)
+		);
 		send_buddy_list(ctx, 1);
 		break;
 	case PACKET_LIST_CATEGORY:
@@ -411,7 +424,7 @@ void general_flow(struct pt_context *ctx)
 
 		broadcast_status(ctx);
 		break;
-	case PACKET_SET_DISPLAYNAME:
+	case PACKET_SET_BUDDY_DISPLAY:
 		/**
 		 * Data:
 		 *   0 - 3: uid (32 bits)

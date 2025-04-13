@@ -398,7 +398,7 @@ int register_user(void *db_w, struct user *u)
 	paid1 = u->paid1 ? (*u->paid1 == 'N' ? 0 : *u->paid1) : 0;
 	db_reset_prepared(insert_user);
 	db_bind(insert_user, "tttttiitiiiiit", u->nickname, u->email, u->first,
-	        u->last, u->privacy ? u->privacy : "G", !!u->verified,
+	        u->last, u->privacy ? u->privacy : "A", !!u->verified,
 	        !!u->random, u->paid1 ? u->paid1 : "N",
 	        !!u->get_offers_from_us, !!u->get_offers_from_affiliates,
 	        !!u->banners, !!u->admin, !!u->sup,
